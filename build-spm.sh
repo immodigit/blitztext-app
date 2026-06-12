@@ -119,6 +119,10 @@ if [ "$INSTALL_APP" = true ]; then
         --entitlements "$RESOURCES_SRC/BlitztextMac.entitlements" \
         "$INSTALL_DEST"
     RUN_TARGET="$INSTALL_DEST"
+
+    # Zwischenkopie im Repo-Ordner entfernen, sonst sieht macOS zwei Blitztext-
+    # Kopien und warnt vor doppelten Login-Items / startet die falsche Instanz.
+    rm -rf "$DEST"
 fi
 
 echo ""
