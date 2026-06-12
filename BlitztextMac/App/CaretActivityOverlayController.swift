@@ -12,7 +12,11 @@ final class CaretActivityOverlayController {
         case processing
     }
 
-    private static let overlaySize = NSSize(width: 28, height: 28)
+    fileprivate static let overlaySize = NSSize(width: 28, height: 28)
+
+    /// Kurzes AX-Timeout, damit eine eingefrorene Ziel-App den Main-Thread
+    /// nicht für den Standard-Timeout (~6 s) blockiert.
+    private static let axMessagingTimeout: Float = 0.25
 
     private var panel: NSPanel?
     private let model = CaretOverlayModel()
@@ -92,6 +96,7 @@ final class CaretActivityOverlayController {
     /// Braucht die Bedienungshilfen-Freigabe; nicht jede App liefert Caret-Bounds.
     private func caretScreenRect() -> CGRect? {
         let systemWide = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(systemWide, Self.axMessagingTimeout)
 
         var focusedValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -102,6 +107,7 @@ final class CaretActivityOverlayController {
             return nil
         }
         let element = focusedValue as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, Self.axMessagingTimeout)
 
         var rangeValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -156,7 +162,10 @@ private struct CaretOverlayView: View {
                 ProcessingRingView()
             }
         }
-        .frame(width: 28, height: 28)
+        .frame(
+            width: CaretActivityOverlayController.overlaySize.width,
+            height: CaretActivityOverlayController.overlaySize.height
+        )
     }
 }
 
