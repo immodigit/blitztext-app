@@ -36,6 +36,14 @@ Der Build dauert beim ersten Mal ein paar Minuten. Danach startet Blitztext auto
 
 Fertig. Hotkey drücken, sprechen, Text erhalten.
 
+**Nach jedem Neubau:** Die App ist nur ad-hoc signiert — jeder Build bekommt eine neue Signatur, und macOS verwirft damit die Bedienungshilfen-Freigabe. Tückisch: Der alte Eintrag in den Systemeinstellungen sieht weiter aktiv aus, wirkt aber nicht mehr. Deshalb nach jedem Build einmal zurücksetzen:
+
+```bash
+tccutil reset Accessibility app.blitztext.mac
+```
+
+Danach Blitztext neu starten und die Freigabe unter Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen neu erteilen.
+
 > Hinweis: Dieser Weg baut die App direkt auf deinem Mac (ohne das große Xcode). Voraussetzung ist macOS 14 oder neuer. Bei Problemen siehe die ausführliche englische Anleitung unten oder [docs/setup.md](docs/setup.md).
 
 ## What It Does
