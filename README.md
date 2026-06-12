@@ -8,6 +8,36 @@ This is a learning and experimentation project, not a polished product.
 
 > Preview status: bring your own OpenAI API key, no hosted backend, no warranty, no support guarantee.
 
+## Quickstart (Deutsch) — Installation in 5 Minuten
+
+Du brauchst keine Entwickler-Erfahrung. Öffne die App **Terminal** (über die Mac-Suche: `cmd + Leertaste`, dann „Terminal" tippen) und kopiere die folgenden Befehle nacheinander hinein — jeweils mit Enter bestätigen.
+
+**1. Apple Command Line Tools installieren** (einmalig, falls noch nicht vorhanden — es öffnet sich ein Installationsfenster):
+
+```bash
+xcode-select --install
+```
+
+**2. Blitztext herunterladen und installieren:**
+
+```bash
+git clone https://github.com/immodigit/blitztext-app.git
+cd blitztext-app
+./build-spm.sh --install --run
+```
+
+Der Build dauert beim ersten Mal ein paar Minuten. Danach startet Blitztext automatisch und erscheint als Symbol **oben rechts in der Menüleiste** (nicht im Dock).
+
+**3. Einmalig einrichten:**
+
+1. **Mikrofon erlauben**, wenn macOS danach fragt.
+2. **Bedienungshilfen erlauben** (Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen → Blitztext aktivieren), damit der Text direkt in deine App eingefügt wird.
+3. In den Blitztext-Einstellungen deinen **OpenAI API Key** eintragen ([hier erstellen](https://platform.openai.com/api-keys)).
+
+Fertig. Hotkey drücken, sprechen, Text erhalten.
+
+> Hinweis: Dieser Weg baut die App direkt auf deinem Mac (ohne das große Xcode). Voraussetzung ist macOS 14 oder neuer. Bei Problemen siehe die ausführliche englische Anleitung unten oder [docs/setup.md](docs/setup.md).
+
 ## What It Does
 
 - **Blitztext**: record speech and transcribe it.
