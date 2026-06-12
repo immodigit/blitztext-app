@@ -21,7 +21,7 @@ xcode-select --install
 **2. Blitztext herunterladen und installieren:**
 
 ```bash
-git clone https://github.com/immodigit/blitztext-app.git
+git clone https://github.com/cmagnussen/blitztext-app.git
 cd blitztext-app
 ./build-spm.sh --install --run
 ```
