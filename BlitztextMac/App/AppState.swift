@@ -331,6 +331,9 @@ final class AppState {
                 return
             }
 
+            var succeeded = 0
+            var failures: [String] = []
+
             while !fileTranscriptionQueue.isEmpty {
                 if Task.isCancelled { return }
                 let job = fileTranscriptionQueue.removeFirst()
@@ -346,7 +349,7 @@ final class AppState {
                 do {
                     let result = try await transcribeAudioFile(at: job.url, reportProgress: true)
                     guard !result.text.isEmpty else {
-                        fileTranscriptionState = .failed("Keine Sprache in „\(job.url.lastPathComponent)“ erkannt.")
+                        failures.append("\(job.url.lastPathComponent): keine Sprache erkannt")
                         continue
                     }
                     if job.writeTextFile {
@@ -359,6 +362,7 @@ final class AppState {
                             fileTranscriptionWrittenOutputs.append(srt)
                         }
                     }
+                    succeeded += 1
                     fileTranscriptionState = .done(
                         text: result.text,
                         fileName: job.url.lastPathComponent,
@@ -367,14 +371,21 @@ final class AppState {
                 } catch is CancellationError {
                     return
                 } catch {
-                    fileTranscriptionState = .failed(error.localizedDescription)
+                    failures.append("\(job.url.lastPathComponent): \(error.localizedDescription)")
                 }
             }
 
-            // Am Ende alle geschriebenen .txt gesammelt im Finder zeigen.
+            // Am Ende alle geschriebenen Dateien gesammelt im Finder zeigen.
             if !fileTranscriptionWrittenOutputs.isEmpty {
                 NSWorkspace.shared.activateFileViewerSelecting(fileTranscriptionWrittenOutputs)
                 fileTranscriptionWrittenOutputs.removeAll()
+            }
+
+            // Fehler im Stapel sichtbar machen (statt sie hinter der letzten Datei zu verstecken).
+            if let summary = TranscriptionBatchSummary.text(succeeded: succeeded, failures: failures) {
+                fileTranscriptionState = succeeded == 0
+                    ? .failed(summary)
+                    : .done(text: summary, fileName: "Stapel-Bilanz", savedToFile: true)
             }
         }
     }

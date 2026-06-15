@@ -136,6 +136,21 @@ equal(SubtitleFormatter.strippingTokens("Nee."), "Nee.", "lässt token-freien Te
 equal(SubtitleFormatter.strippingTokens("<|5.06|> Macht aber nicht.<|6.06|>"), "Macht aber nicht.", "entfernt umschließende Zeit-Tokens")
 equal(SubtitleFormatter.strippingTokens(""), "", "leer bleibt leer")
 
+// MARK: - TranscriptionBatchSummary (Fix 3: Stapel-Fehler sichtbar machen)
+
+check(TranscriptionBatchSummary.text(succeeded: 8, failures: []) == nil,
+      "ohne Fehler keine Bilanz")
+equal(
+    TranscriptionBatchSummary.text(succeeded: 7, failures: ["IMG_1.mov: keine Sprache erkannt"]) ?? "",
+    "7 erfolgreich, 1 fehlgeschlagen:\n• IMG_1.mov: keine Sprache erkannt",
+    "eine fehlgeschlagene Datei"
+)
+equal(
+    TranscriptionBatchSummary.text(succeeded: 0, failures: ["a", "b"]) ?? "",
+    "0 erfolgreich, 2 fehlgeschlagen:\n• a\n• b",
+    "alle fehlgeschlagen, mehrere Einträge"
+)
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")
