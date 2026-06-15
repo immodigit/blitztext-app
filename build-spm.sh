@@ -102,6 +102,24 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 			</array>
 		</dict>
 	</array>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Mit Blitztext transkribieren</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>transcribeFilesService</string>
+			<key>NSPortName</key>
+			<string>Blitztext</string>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.audio</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
 PLIST

@@ -1106,8 +1106,8 @@ struct FileTranscriptionContentView: View {
                     Spacer().frame(height: 24)
                 }
 
-            case .done(let text, let fileName):
-                resultView(text: text, fileName: fileName)
+            case .done(let text, let fileName, let savedToFile):
+                resultView(text: text, fileName: fileName, savedToFile: savedToFile)
 
             case .failed(let message):
                 errorView(message: message) {
@@ -1135,7 +1135,7 @@ struct FileTranscriptionContentView: View {
         }
     }
 
-    private func resultView(text: String, fileName: String) -> some View {
+    private func resultView(text: String, fileName: String, savedToFile: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
@@ -1186,22 +1186,32 @@ struct FileTranscriptionContentView: View {
                 }
                 .buttonStyle(SubtleButtonStyle())
 
-                Button {
-                    appState.saveTranscriptAsTextFile()
-                    withAnimation(.easeInOut(duration: 0.2)) { savedTxt = true }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-                        withAnimation(.easeInOut(duration: 0.2)) { savedTxt = false }
-                    }
-                } label: {
+                if savedToFile {
                     HStack(spacing: 4) {
-                        Image(systemName: savedTxt ? "checkmark" : "arrow.down.doc")
+                        Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10, weight: .bold))
-                        Text(savedTxt ? "Gespeichert" : "Als .txt")
+                        Text(".txt gespeichert")
                     }
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(savedTxt ? .green : .blue)
+                    .foregroundStyle(.green)
+                } else {
+                    Button {
+                        appState.saveTranscriptAsTextFile()
+                        withAnimation(.easeInOut(duration: 0.2)) { savedTxt = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                            withAnimation(.easeInOut(duration: 0.2)) { savedTxt = false }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: savedTxt ? "checkmark" : "arrow.down.doc")
+                                .font(.system(size: 10, weight: .bold))
+                            Text(savedTxt ? "Gespeichert" : "Als .txt")
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(savedTxt ? .green : .blue)
+                    }
+                    .buttonStyle(SubtleButtonStyle())
                 }
-                .buttonStyle(SubtleButtonStyle())
 
                 Spacer()
 

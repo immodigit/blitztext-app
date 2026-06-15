@@ -15,8 +15,14 @@ enum PopoverPage: Equatable {
 enum FileTranscriptionState: Equatable {
     case idle
     case running(fileName: String)
-    case done(text: String, fileName: String)
+    case done(text: String, fileName: String, savedToFile: Bool)
     case failed(String)
+}
+
+/// Ein Transkriptions-Auftrag in der Warteschlange.
+struct FileTranscriptionJob {
+    let url: URL
+    let writeTextFile: Bool
 }
 
 @Observable
@@ -38,6 +44,9 @@ final class AppState {
     var fileTranscriptionState: FileTranscriptionState = .idle
     private var fileTranscriptionTask: Task<Void, Never>?
     private var lastTranscriptionSourceURL: URL?
+    private var fileTranscriptionQueue: [FileTranscriptionJob] = []
+    private var fileTranscriptionWrittenOutputs: [URL] = []
+    private var isProcessingFileTranscriptionQueue = false
     var localModelDownloadProgress: Double?
     var localModelDownloadStatusText: String?
     var localModelDownloadErrorText: String?
@@ -277,95 +286,89 @@ final class AppState {
     }
 
     /// Einstieg aus dem Finder ("Öffnen mit → Blitztext"). Transkribiert die
-    /// Datei(en) und legt je eine .txt neben das Original.
+    /// Datei(en) nacheinander und legt je eine .txt neben das Original.
     func handleOpenedAudioFiles(_ urls: [URL]) {
         let audioURLs = urls.filter { url in
             (UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio)) ?? false
         }
         guard !audioURLs.isEmpty else { return }
+        enqueueFileTranscriptions(audioURLs.map { FileTranscriptionJob(url: $0, writeTextFile: true) })
+    }
 
-        if audioURLs.count == 1 {
-            startFileTranscription(url: audioURLs[0], writeTextFileOnFinish: true)
-            return
-        }
+    /// Transkribiert eine über den Datei-Dialog gewählte Audiodatei (Ergebnis im Popover).
+    func startFileTranscription(url: URL, writeTextFileOnFinish: Bool = false) {
+        enqueueFileTranscriptions([FileTranscriptionJob(url: url, writeTextFile: writeTextFileOnFinish)])
+    }
 
-        // Stapel: alle transkribieren, je eine .txt schreiben, Übersicht zeigen.
-        fileTranscriptionTask?.cancel()
-        lastTranscriptionSourceURL = audioURLs[0]
+    /// Hängt Aufträge an die Warteschlange an und startet die Abarbeitung.
+    /// Robust gegen jede Auslieferungsart von macOS (Sammel- oder Einzelaufrufe):
+    /// neue Dateien brechen die laufende Transkription nicht ab, sondern reihen sich an.
+    private func enqueueFileTranscriptions(_ jobs: [FileTranscriptionJob]) {
+        guard !jobs.isEmpty else { return }
+        fileTranscriptionQueue.append(contentsOf: jobs)
         page = .fileTranscription
-        fileTranscriptionState = .running(fileName: "\(audioURLs.count) Dateien")
-
-        if let availabilityError = fileTranscriptionAvailabilityError() {
-            fileTranscriptionState = .failed(availabilityError)
-            return
+        if !isProcessingFileTranscriptionQueue, let first = fileTranscriptionQueue.first {
+            fileTranscriptionState = .running(fileName: first.url.lastPathComponent)
         }
+        processFileTranscriptionQueue()
+    }
+
+    private func processFileTranscriptionQueue() {
+        guard !isProcessingFileTranscriptionQueue else { return }
+        isProcessingFileTranscriptionQueue = true
 
         fileTranscriptionTask = Task(priority: .userInitiated) {
-            var written: [URL] = []
-            var firstText: String?
-            for (index, url) in audioURLs.enumerated() {
+            defer { isProcessingFileTranscriptionQueue = false }
+
+            if let availabilityError = fileTranscriptionAvailabilityError() {
+                fileTranscriptionQueue.removeAll()
+                fileTranscriptionState = .failed(availabilityError)
+                return
+            }
+
+            while !fileTranscriptionQueue.isEmpty {
                 if Task.isCancelled { return }
-                fileTranscriptionState = .running(fileName: "Datei \(index + 1)/\(audioURLs.count): \(url.lastPathComponent)")
+                let job = fileTranscriptionQueue.removeFirst()
+                lastTranscriptionSourceURL = job.url
+
+                let remaining = fileTranscriptionQueue.count
+                let label = remaining > 0
+                    ? "\(job.url.lastPathComponent) (noch \(remaining))"
+                    : job.url.lastPathComponent
+                fileTranscriptionState = .running(fileName: label)
+
                 do {
-                    let text = try await transcribeAudioFile(at: url)
-                    guard !text.isEmpty else { continue }
-                    if firstText == nil { firstText = text }
-                    if let output = writeTranscript(text, forSource: url) {
-                        written.append(output)
+                    let text = try await transcribeAudioFile(at: job.url)
+                    guard !text.isEmpty else {
+                        fileTranscriptionState = .failed("Keine Sprache in „\(job.url.lastPathComponent)“ erkannt.")
+                        continue
                     }
+                    if job.writeTextFile, let output = writeTranscript(text, forSource: job.url) {
+                        fileTranscriptionWrittenOutputs.append(output)
+                    }
+                    fileTranscriptionState = .done(
+                        text: text,
+                        fileName: job.url.lastPathComponent,
+                        savedToFile: job.writeTextFile
+                    )
                 } catch is CancellationError {
                     return
                 } catch {
-                    // Eine fehlgeschlagene Datei stoppt den Stapel nicht.
+                    fileTranscriptionState = .failed(error.localizedDescription)
                 }
             }
 
-            if written.isEmpty {
-                fileTranscriptionState = .failed("Keine der Dateien konnte transkribiert werden.")
-            } else {
-                let summary = "\(written.count) Transkript(e) als .txt gespeichert.\n\n\(firstText ?? "")"
-                fileTranscriptionState = .done(text: summary, fileName: "\(audioURLs.count) Dateien")
-                NSWorkspace.shared.activateFileViewerSelecting(written)
+            // Am Ende alle geschriebenen .txt gesammelt im Finder zeigen.
+            if !fileTranscriptionWrittenOutputs.isEmpty {
+                NSWorkspace.shared.activateFileViewerSelecting(fileTranscriptionWrittenOutputs)
+                fileTranscriptionWrittenOutputs.removeAll()
             }
         }
     }
 
-    /// Transkribiert eine vorhandene Audiodatei mit dem aktuell gewählten Backend/Modell.
-    func startFileTranscription(url: URL, writeTextFileOnFinish: Bool = false) {
-        fileTranscriptionTask?.cancel()
-        lastTranscriptionSourceURL = url
-        let fileName = url.lastPathComponent
-        page = .fileTranscription
-        fileTranscriptionState = .running(fileName: fileName)
-
-        if let availabilityError = fileTranscriptionAvailabilityError() {
-            fileTranscriptionState = .failed(availabilityError)
-            return
-        }
-
-        fileTranscriptionTask = Task(priority: .userInitiated) {
-            do {
-                let cleaned = try await transcribeAudioFile(at: url)
-                try Task.checkCancellation()
-                guard !cleaned.isEmpty else {
-                    fileTranscriptionState = .failed("Keine Sprache in der Datei erkannt.")
-                    return
-                }
-                fileTranscriptionState = .done(text: cleaned, fileName: fileName)
-                if writeTextFileOnFinish, let output = writeTranscript(cleaned, forSource: url) {
-                    NSWorkspace.shared.activateFileViewerSelecting([output])
-                }
-            } catch is CancellationError {
-                // Nutzer hat abgebrochen — kein Fehler.
-            } catch {
-                fileTranscriptionState = .failed(error.localizedDescription)
-            }
-        }
-    }
-
-    /// Speichert das aktuelle Transkript als .txt neben der Quelldatei (In-App-Button).
+    /// Speichert das aktuell gezeigte Transkript als .txt neben der Quelldatei (In-App-Button).
     func saveTranscriptAsTextFile() {
-        guard case let .done(text, _) = fileTranscriptionState,
+        guard case let .done(text, _, _) = fileTranscriptionState,
               let source = lastTranscriptionSourceURL,
               let output = writeTranscript(text, forSource: source) else {
             return

@@ -37,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         NSApp.setActivationPolicy(.accessory)
 
+        // macOS-Dienst "Mit Blitztext transkribieren" (Rechtsklick → Dienste) registrieren.
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
+
         // Hotkey events
         appState.hotkeyService.onHotkeyEvent = { [weak self] event in
             self?.handleHotkeyEvent(event)
@@ -75,6 +79,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // Kann beim Start-zum-Öffnen vor applicationDidFinishLaunching feuern — daher
     // das Anzeigen verschieben, falls die Menüleisten-UI noch nicht bereit ist.
     func application(_ application: NSApplication, open urls: [URL]) {
+        importOpenedAudioFiles(urls)
+    }
+
+    // macOS-Dienst "Mit Blitztext transkribieren" (Rechtsklick → Dienste).
+    // Der Selektor heißt <NSMessage>:userData:error: — siehe NSServices in Info.plist.
+    @objc func transcribeFilesService(
+        _ pasteboard: NSPasteboard,
+        userData: String?,
+        error: AutoreleasingUnsafeMutablePointer<NSString>?
+    ) {
+        let urls = (pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL]) ?? []
+        importOpenedAudioFiles(urls)
+    }
+
+    private func importOpenedAudioFiles(_ urls: [URL]) {
         appState.handleOpenedAudioFiles(urls)
         if statusItem != nil {
             showPopover()
