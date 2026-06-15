@@ -278,9 +278,9 @@ final class AppState {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.audio]
+        panel.allowedContentTypes = [.audio, .movie]
         panel.prompt = "Transkribieren"
-        panel.message = "Audiodatei zum Transkribieren auswählen (z. B. Sprachmemo)"
+        panel.message = "Audio- oder Videodatei zum Transkribieren auswählen (Video erzeugt zusätzlich .srt-Untertitel)"
 
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -290,11 +290,12 @@ final class AppState {
     /// Einstieg aus dem Finder ("Öffnen mit → Blitztext"). Transkribiert die
     /// Datei(en) nacheinander und legt je eine .txt neben das Original.
     func handleOpenedAudioFiles(_ urls: [URL]) {
-        let audioURLs = urls.filter { url in
-            (UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio)) ?? false
+        let mediaURLs = urls.filter { url in
+            guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+            return type.conforms(to: .audio) || type.conforms(to: .movie)
         }
-        guard !audioURLs.isEmpty else { return }
-        enqueueFileTranscriptions(audioURLs.map { FileTranscriptionJob(url: $0, writeTextFile: true) })
+        guard !mediaURLs.isEmpty else { return }
+        enqueueFileTranscriptions(mediaURLs.map { FileTranscriptionJob(url: $0, writeTextFile: true) })
     }
 
     /// Transkribiert eine über den Datei-Dialog gewählte Audiodatei (Ergebnis im Popover).
@@ -341,16 +342,23 @@ final class AppState {
                 fileTranscriptionState = .running(fileName: label, progress: nil)
 
                 do {
-                    let text = try await transcribeAudioFile(at: job.url, reportProgress: true)
-                    guard !text.isEmpty else {
+                    let result = try await transcribeAudioFile(at: job.url, reportProgress: true)
+                    guard !result.text.isEmpty else {
                         fileTranscriptionState = .failed("Keine Sprache in „\(job.url.lastPathComponent)“ erkannt.")
                         continue
                     }
-                    if job.writeTextFile, let output = writeTranscript(text, forSource: job.url) {
-                        fileTranscriptionWrittenOutputs.append(output)
+                    if job.writeTextFile {
+                        if let txt = writeOutputFile(result.text, forSource: job.url, ext: "txt") {
+                            fileTranscriptionWrittenOutputs.append(txt)
+                        }
+                        // Untertitel mit Timestamps, sofern Segmente vorliegen (lokaler Modus).
+                        if !result.cues.isEmpty,
+                           let srt = writeOutputFile(SubtitleFormatter.srt(from: result.cues), forSource: job.url, ext: "srt") {
+                            fileTranscriptionWrittenOutputs.append(srt)
+                        }
                     }
                     fileTranscriptionState = .done(
-                        text: text,
+                        text: result.text,
                         fileName: job.url.lastPathComponent,
                         savedToFile: job.writeTextFile
                     )
@@ -373,7 +381,7 @@ final class AppState {
     func saveTranscriptAsTextFile() {
         guard case let .done(text, _, _) = fileTranscriptionState,
               let source = lastTranscriptionSourceURL,
-              let output = writeTranscript(text, forSource: source) else {
+              let output = writeOutputFile(text, forSource: source, ext: "txt") else {
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([output])
@@ -401,17 +409,31 @@ final class AppState {
             : "Kein OpenAI API Key hinterlegt. Trage ihn in den Einstellungen ein oder aktiviere den lokalen Modus."
     }
 
-    /// Transkribiert eine Datei über eine Kopie (Original bleibt unangetastet,
-    /// da der Online-Pfad die Eingabedatei nach Abschluss löscht).
-    private func transcribeAudioFile(at url: URL, reportProgress: Bool = false) async throws -> String {
-        let fileExtension = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("blitztext-import-\(UUID().uuidString).\(fileExtension)")
-        defer { try? FileManager.default.removeItem(at: tempURL) }
-
-        try FileManager.default.copyItem(at: url, to: tempURL)
+    /// Transkribiert eine Datei und liefert Text + Untertitel-Cues (Timestamps).
+    /// Videos: erst Tonspur extrahieren (WhisperKit liest kein Video).
+    /// Audio: auf Kopie arbeiten (Online-Pfad löscht die Eingabedatei).
+    private func transcribeAudioFile(
+        at url: URL,
+        reportProgress: Bool = false
+    ) async throws -> (text: String, cues: [SubtitleCue]) {
+        let audioURL: URL
+        if VideoAudioExtractor.isVideo(url) {
+            fileTranscriptionState = .running(
+                fileName: "\(currentFileTranscriptionLabel) – Tonspur wird extrahiert …",
+                progress: nil
+            )
+            audioURL = try await VideoAudioExtractor.extractAudioToTemporaryFile(from: url)
+        } else {
+            let fileExtension = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("blitztext-import-\(UUID().uuidString).\(fileExtension)")
+            try FileManager.default.copyItem(at: url, to: tempURL)
+            audioURL = tempURL
+        }
+        defer { try? FileManager.default.removeItem(at: audioURL) }
 
         let text: String
+        var cues: [SubtitleCue] = []
         if appSettings.secureLocalModeEnabled {
             // Fortschritt nebenläufig pollen (nur lokal — Online liefert keinen).
             let progressPoll: Task<Void, Never>? = reportProgress ? Task { @MainActor in
@@ -423,19 +445,24 @@ final class AppState {
             } : nil
             defer { progressPoll?.cancel() }
 
-            text = try await LocalTranscriptionService.shared.transcribe(
-                audioURL: tempURL,
+            let result = try await LocalTranscriptionService.shared.transcribeWithSegments(
+                audioURL: audioURL,
                 language: transcriptionSettings.language,
                 modelName: selectedLocalModelName
             )
+            text = result.text
+            cues = result.segments
+                .map { (start: $0.start, end: $0.end, text: SubtitleFormatter.strippingTokens($0.text)) }
+                .filter { !$0.text.isEmpty && $0.end > $0.start }
+                .map { SubtitleCue(start: $0.start, end: $0.end, text: $0.text) }
         } else {
             text = try await TranscriptionService.transcribe(
-                audioURL: tempURL,
+                audioURL: audioURL,
                 customTerms: textImprovementSettings.customTerms,
                 language: transcriptionSettings.language
             )
         }
-        return TranscriptionQualityService.cleanedTranscript(text)
+        return (TranscriptionQualityService.cleanedTranscript(text), cues)
     }
 
     /// Aktualisiert die Fortschrittsanzeige während der laufenden Datei-Transkription.
@@ -447,25 +474,25 @@ final class AppState {
         )
     }
 
-    /// Schreibt das Transkript als .txt neben das Original; Fallback ~/Downloads.
-    /// Überschreibt nichts — hängt bei Bedarf -1, -2 … an.
+    /// Schreibt Inhalt als Datei mit gegebener Endung neben das Original;
+    /// Fallback ~/Downloads. Überschreibt nichts — hängt bei Bedarf -1, -2 … an.
     @discardableResult
-    private func writeTranscript(_ text: String, forSource sourceURL: URL) -> URL? {
+    private func writeOutputFile(_ content: String, forSource sourceURL: URL, ext: String) -> URL? {
         let base = sourceURL.deletingPathExtension().lastPathComponent
         let exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
 
         func uniqueURL(in directory: URL) -> URL {
-            TranscriptFileNaming.uniqueURL(forBase: base, in: directory, fileExists: exists)
+            TranscriptFileNaming.uniqueURL(forBase: base, ext: ext, in: directory, fileExists: exists)
         }
 
         let primaryTarget = uniqueURL(in: sourceURL.deletingLastPathComponent())
-        if (try? text.write(to: primaryTarget, atomically: true, encoding: .utf8)) != nil {
+        if (try? content.write(to: primaryTarget, atomically: true, encoding: .utf8)) != nil {
             return primaryTarget
         }
 
         if let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
             let fallback = uniqueURL(in: downloads)
-            if (try? text.write(to: fallback, atomically: true, encoding: .utf8)) != nil {
+            if (try? content.write(to: fallback, atomically: true, encoding: .utf8)) != nil {
                 return fallback
             }
         }

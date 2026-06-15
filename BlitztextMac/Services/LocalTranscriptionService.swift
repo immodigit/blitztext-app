@@ -261,6 +261,15 @@ actor LocalTranscriptionService {
     }
 
     func transcribe(audioURL: URL, language: String, modelName: String) async throws -> String {
+        try await transcribeWithSegments(audioURL: audioURL, language: language, modelName: modelName).text
+    }
+
+    /// Transkription samt Zeitsegmenten (für Untertitel/Timestamps).
+    func transcribeWithSegments(
+        audioURL: URL,
+        language: String,
+        modelName: String
+    ) async throws -> (text: String, segments: [(start: Double, end: Double, text: String)]) {
         let resolvedLanguage = language.trimmingCharacters(in: .whitespacesAndNewlines)
         let decodeOptions = DecodingOptions(
             task: .transcribe,
@@ -281,7 +290,13 @@ actor LocalTranscriptionService {
             throw LocalTranscriptionError.noText
         }
 
-        return text
+        let segments = results.flatMap { $0.segments }.map {
+            (start: Double($0.start),
+             end: Double($0.end),
+             text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        return (text, segments)
     }
 
     private func pipeline(modelName: String) async throws -> WhisperKit {

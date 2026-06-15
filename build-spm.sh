@@ -95,6 +95,7 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>public.audio</string>
+				<string>public.movie</string>
 				<string>com.apple.m4a-audio</string>
 				<string>public.mp3</string>
 				<string>com.microsoft.waveform-audio</string>
@@ -117,6 +118,7 @@ cat > "$DEST/Contents/Info.plist" <<PLIST
 			<key>NSSendFileTypes</key>
 			<array>
 				<string>public.audio</string>
+				<string>public.movie</string>
 			</array>
 		</dict>
 	</array>

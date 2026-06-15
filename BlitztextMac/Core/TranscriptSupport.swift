@@ -20,13 +20,14 @@ public enum TranscriptFileNaming {
     /// `<base>-1.txt`, `<base>-2.txt`, … gewählt — es wird nie überschrieben.
     public static func uniqueURL(
         forBase base: String,
+        ext: String = "txt",
         in directory: URL,
         fileExists: (URL) -> Bool
     ) -> URL {
-        var target = directory.appendingPathComponent(base + ".txt")
+        var target = directory.appendingPathComponent("\(base).\(ext)")
         var index = 1
         while fileExists(target) {
-            target = directory.appendingPathComponent("\(base)-\(index).txt")
+            target = directory.appendingPathComponent("\(base)-\(index).\(ext)")
             index += 1
         }
         return target
