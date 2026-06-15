@@ -1,12 +1,22 @@
 import SwiftUI
 import Observation
 import AppKit
+import UniformTypeIdentifiers
 
 enum PopoverPage: Equatable {
     case main
     case onboarding
     case settings
     case workflow
+    case fileTranscription
+}
+
+/// Zustand der Datei-Transkription (Sprachnachricht aus einer Datei, z. B. iPhone-Memo).
+enum FileTranscriptionState: Equatable {
+    case idle
+    case running(fileName: String)
+    case done(text: String, fileName: String)
+    case failed(String)
 }
 
 @Observable
@@ -25,6 +35,9 @@ final class AppState {
         }
     }
     var accessibilityPermissionGranted = false
+    var fileTranscriptionState: FileTranscriptionState = .idle
+    private var fileTranscriptionTask: Task<Void, Never>?
+    private var lastTranscriptionSourceURL: URL?
     var localModelDownloadProgress: Double?
     var localModelDownloadStatusText: String?
     var localModelDownloadErrorText: String?
@@ -244,6 +257,196 @@ final class AppState {
         workflowCleanupTask?.cancel()
         menuBarStatus = .idle
         page = .main
+    }
+
+    // MARK: - Datei-Transkription (MVP)
+
+    /// Öffnet einen Datei-Dialog und startet die Transkription der gewählten Audiodatei.
+    func presentFileTranscription() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.audio]
+        panel.prompt = "Transkribieren"
+        panel.message = "Audiodatei zum Transkribieren auswählen (z. B. Sprachmemo)"
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        startFileTranscription(url: url)
+    }
+
+    /// Einstieg aus dem Finder ("Öffnen mit → Blitztext"). Transkribiert die
+    /// Datei(en) und legt je eine .txt neben das Original.
+    func handleOpenedAudioFiles(_ urls: [URL]) {
+        let audioURLs = urls.filter { url in
+            (UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio)) ?? false
+        }
+        guard !audioURLs.isEmpty else { return }
+
+        if audioURLs.count == 1 {
+            startFileTranscription(url: audioURLs[0], writeTextFileOnFinish: true)
+            return
+        }
+
+        // Stapel: alle transkribieren, je eine .txt schreiben, Übersicht zeigen.
+        fileTranscriptionTask?.cancel()
+        lastTranscriptionSourceURL = audioURLs[0]
+        page = .fileTranscription
+        fileTranscriptionState = .running(fileName: "\(audioURLs.count) Dateien")
+
+        if let availabilityError = fileTranscriptionAvailabilityError() {
+            fileTranscriptionState = .failed(availabilityError)
+            return
+        }
+
+        fileTranscriptionTask = Task(priority: .userInitiated) {
+            var written: [URL] = []
+            var firstText: String?
+            for (index, url) in audioURLs.enumerated() {
+                if Task.isCancelled { return }
+                fileTranscriptionState = .running(fileName: "Datei \(index + 1)/\(audioURLs.count): \(url.lastPathComponent)")
+                do {
+                    let text = try await transcribeAudioFile(at: url)
+                    guard !text.isEmpty else { continue }
+                    if firstText == nil { firstText = text }
+                    if let output = writeTranscript(text, forSource: url) {
+                        written.append(output)
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    // Eine fehlgeschlagene Datei stoppt den Stapel nicht.
+                }
+            }
+
+            if written.isEmpty {
+                fileTranscriptionState = .failed("Keine der Dateien konnte transkribiert werden.")
+            } else {
+                let summary = "\(written.count) Transkript(e) als .txt gespeichert.\n\n\(firstText ?? "")"
+                fileTranscriptionState = .done(text: summary, fileName: "\(audioURLs.count) Dateien")
+                NSWorkspace.shared.activateFileViewerSelecting(written)
+            }
+        }
+    }
+
+    /// Transkribiert eine vorhandene Audiodatei mit dem aktuell gewählten Backend/Modell.
+    func startFileTranscription(url: URL, writeTextFileOnFinish: Bool = false) {
+        fileTranscriptionTask?.cancel()
+        lastTranscriptionSourceURL = url
+        let fileName = url.lastPathComponent
+        page = .fileTranscription
+        fileTranscriptionState = .running(fileName: fileName)
+
+        if let availabilityError = fileTranscriptionAvailabilityError() {
+            fileTranscriptionState = .failed(availabilityError)
+            return
+        }
+
+        fileTranscriptionTask = Task(priority: .userInitiated) {
+            do {
+                let cleaned = try await transcribeAudioFile(at: url)
+                try Task.checkCancellation()
+                guard !cleaned.isEmpty else {
+                    fileTranscriptionState = .failed("Keine Sprache in der Datei erkannt.")
+                    return
+                }
+                fileTranscriptionState = .done(text: cleaned, fileName: fileName)
+                if writeTextFileOnFinish, let output = writeTranscript(cleaned, forSource: url) {
+                    NSWorkspace.shared.activateFileViewerSelecting([output])
+                }
+            } catch is CancellationError {
+                // Nutzer hat abgebrochen — kein Fehler.
+            } catch {
+                fileTranscriptionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Speichert das aktuelle Transkript als .txt neben der Quelldatei (In-App-Button).
+    func saveTranscriptAsTextFile() {
+        guard case let .done(text, _) = fileTranscriptionState,
+              let source = lastTranscriptionSourceURL,
+              let output = writeTranscript(text, forSource: source) else {
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([output])
+    }
+
+    func resetFileTranscription() {
+        fileTranscriptionTask?.cancel()
+        fileTranscriptionTask = nil
+        fileTranscriptionState = .idle
+        page = .main
+    }
+
+    /// Prüft, ob das aktuell gewählte Backend einsatzbereit ist.
+    private func fileTranscriptionAvailabilityError() -> String? {
+        if appSettings.secureLocalModeEnabled {
+            return selectedLocalModelIsInstalled
+                ? nil
+                : "Kein lokales Modell installiert. Lade im Menü ein Modell oder schalte den lokalen Modus aus."
+        }
+        return KeychainService.isConfigured
+            ? nil
+            : "Kein OpenAI API Key hinterlegt. Trage ihn in den Einstellungen ein oder aktiviere den lokalen Modus."
+    }
+
+    /// Transkribiert eine Datei über eine Kopie (Original bleibt unangetastet,
+    /// da der Online-Pfad die Eingabedatei nach Abschluss löscht).
+    private func transcribeAudioFile(at url: URL) async throws -> String {
+        let fileExtension = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("blitztext-import-\(UUID().uuidString).\(fileExtension)")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        try FileManager.default.copyItem(at: url, to: tempURL)
+
+        let text: String
+        if appSettings.secureLocalModeEnabled {
+            text = try await LocalTranscriptionService.shared.transcribe(
+                audioURL: tempURL,
+                language: transcriptionSettings.language,
+                modelName: selectedLocalModelName
+            )
+        } else {
+            text = try await TranscriptionService.transcribe(
+                audioURL: tempURL,
+                customTerms: textImprovementSettings.customTerms,
+                language: transcriptionSettings.language
+            )
+        }
+        return TranscriptionQualityService.cleanedTranscript(text)
+    }
+
+    /// Schreibt das Transkript als .txt neben das Original; Fallback ~/Downloads.
+    /// Überschreibt nichts — hängt bei Bedarf -1, -2 … an.
+    @discardableResult
+    private func writeTranscript(_ text: String, forSource sourceURL: URL) -> URL? {
+        let base = sourceURL.deletingPathExtension().lastPathComponent
+
+        func uniqueURL(in directory: URL) -> URL {
+            var target = directory.appendingPathComponent(base + ".txt")
+            var index = 1
+            while FileManager.default.fileExists(atPath: target.path) {
+                target = directory.appendingPathComponent("\(base)-\(index).txt")
+                index += 1
+            }
+            return target
+        }
+
+        let primaryTarget = uniqueURL(in: sourceURL.deletingLastPathComponent())
+        if (try? text.write(to: primaryTarget, atomically: true, encoding: .utf8)) != nil {
+            return primaryTarget
+        }
+
+        if let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
+            let fallback = uniqueURL(in: downloads)
+            if (try? text.write(to: fallback, atomically: true, encoding: .utf8)) != nil {
+                return fallback
+            }
+        }
+        return nil
     }
 
     func enableSecureLocalMode() {

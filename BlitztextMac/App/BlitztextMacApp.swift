@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var popover: NSPopover!
     private let menuBarStatusController = MenuBarStatusController()
     private let caretOverlayController = CaretActivityOverlayController()
+    private var pendingFileImportPopover = false
     let appState = AppState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -55,13 +56,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         )
 
         DispatchQueue.main.async { [weak self] in
-            self?.showOnboardingIfNeeded()
+            guard let self else { return }
+            if self.pendingFileImportPopover {
+                self.pendingFileImportPopover = false
+                self.showPopover()
+            } else {
+                self.showOnboardingIfNeeded()
+            }
         }
     }
 
     @objc private func handleDismissPopover() {
         appState.isPopoverShown = false
         popover.performClose(nil)
+    }
+
+    // Finder "Öffnen mit → Blitztext": Audiodatei(en) transkribieren und als .txt ablegen.
+    // Kann beim Start-zum-Öffnen vor applicationDidFinishLaunching feuern — daher
+    // das Anzeigen verschieben, falls die Menüleisten-UI noch nicht bereit ist.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        appState.handleOpenedAudioFiles(urls)
+        if statusItem != nil {
+            showPopover()
+        } else {
+            pendingFileImportPopover = true
+        }
     }
 
     private func handleHotkeyEvent(_ event: HotkeyEvent) {
@@ -135,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func showPopover() {
-        guard let button = statusItem.button else { return }
+        guard let popover, let button = statusItem?.button else { return }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         appState.isPopoverShown = true
         NSApp.activate(ignoringOtherApps: true)

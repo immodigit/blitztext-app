@@ -14,6 +14,8 @@ struct MenuBarView: View {
                 settingsPage
             case .workflow:
                 workflowPage
+            case .fileTranscription:
+                fileTranscriptionPage
             }
         }
         .frame(width: 340)
@@ -113,6 +115,98 @@ struct MenuBarView: View {
                 }
             }
             .padding(.vertical, 2)
+
+            if appState.isConfigured {
+                fileTranscriptionEntry
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, 6)
+            }
+
+            appFooter
+        }
+    }
+
+    private var fileTranscriptionEntry: some View {
+        Button {
+            appState.presentFileTranscription()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform.badge.plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 22, height: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sprachnachricht transkribieren")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text("Audiodatei auswählen (z. B. iPhone-Memo)")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 4)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(10)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.primary.opacity(0.035))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(SubtleButtonStyle())
+    }
+
+    // MARK: - File Transcription Page
+
+    private var fileTranscriptionPage: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    appState.resetFileTranscription()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Zur\u{00FC}ck")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(SubtleButtonStyle())
+
+                Spacer()
+
+                HStack(spacing: 5) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.blue)
+                    Text("Sprachnachricht")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+                Color.clear.frame(width: 58, height: 18)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            FileTranscriptionContentView(appState: appState)
+
+            Spacer(minLength: 0)
 
             appFooter
         }
@@ -978,6 +1072,147 @@ private func autoPasteView(text: String) -> some View {
             .padding(.horizontal, 8)
 
         Spacer().frame(height: 12)
+    }
+}
+
+// MARK: - File Transcription Content
+
+struct FileTranscriptionContentView: View {
+    @Bindable var appState: AppState
+    @State private var copied = false
+    @State private var savedTxt = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            switch appState.fileTranscriptionState {
+            case .idle:
+                idleView
+
+            case .running(let fileName):
+                VStack(spacing: 12) {
+                    Spacer().frame(height: 24)
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .controlSize(.small)
+                    Text("Transkribiere \u{201E}\(fileName)\u{201C} \u{2026}")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Lange Aufnahmen k\u{00F6}nnen etwas dauern.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Spacer().frame(height: 24)
+                }
+
+            case .done(let text, let fileName):
+                resultView(text: text, fileName: fileName)
+
+            case .failed(let message):
+                errorView(message: message) {
+                    appState.presentFileTranscription()
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+    }
+
+    private var idleView: some View {
+        VStack(spacing: 12) {
+            Spacer().frame(height: 20)
+            Image(systemName: "waveform.badge.plus")
+                .font(.system(size: 24))
+                .foregroundStyle(.blue)
+            Text("Audiodatei w\u{00E4}hlen")
+                .font(.system(size: 13, weight: .semibold))
+            Button("Datei ausw\u{00E4}hlen") {
+                appState.presentFileTranscription()
+            }
+            .buttonStyle(SubtleButtonStyle())
+            Spacer().frame(height: 12)
+        }
+    }
+
+    private func resultView(text: String, fileName: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.green)
+                Text(fileName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.top, 12)
+
+            ScrollView {
+                Text(text)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 220)
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.primary.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            )
+
+            HStack(spacing: 8) {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    withAnimation(.easeInOut(duration: 0.2)) { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                        withAnimation(.easeInOut(duration: 0.2)) { copied = false }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(copied ? "Kopiert" : "Kopieren")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(copied ? .green : .blue)
+                }
+                .buttonStyle(SubtleButtonStyle())
+
+                Button {
+                    appState.saveTranscriptAsTextFile()
+                    withAnimation(.easeInOut(duration: 0.2)) { savedTxt = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                        withAnimation(.easeInOut(duration: 0.2)) { savedTxt = false }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: savedTxt ? "checkmark" : "arrow.down.doc")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(savedTxt ? "Gespeichert" : "Als .txt")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(savedTxt ? .green : .blue)
+                }
+                .buttonStyle(SubtleButtonStyle())
+
+                Spacer()
+
+                Button("Weitere Datei") {
+                    appState.presentFileTranscription()
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .buttonStyle(SubtleButtonStyle())
+            }
+        }
     }
 }
 
