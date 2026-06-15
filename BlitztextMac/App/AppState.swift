@@ -1,6 +1,7 @@
 import SwiftUI
 import Observation
 import AppKit
+import BlitztextCore
 import UniformTypeIdentifiers
 
 enum PopoverPage: Equatable {
@@ -14,7 +15,7 @@ enum PopoverPage: Equatable {
 /// Zustand der Datei-Transkription (Sprachnachricht aus einer Datei, z. B. iPhone-Memo).
 enum FileTranscriptionState: Equatable {
     case idle
-    case running(fileName: String)
+    case running(fileName: String, progress: Double?)
     case done(text: String, fileName: String, savedToFile: Bool)
     case failed(String)
 }
@@ -47,6 +48,7 @@ final class AppState {
     private var fileTranscriptionQueue: [FileTranscriptionJob] = []
     private var fileTranscriptionWrittenOutputs: [URL] = []
     private var isProcessingFileTranscriptionQueue = false
+    private var currentFileTranscriptionLabel = ""
     var localModelDownloadProgress: Double?
     var localModelDownloadStatusText: String?
     var localModelDownloadErrorText: String?
@@ -308,7 +310,7 @@ final class AppState {
         fileTranscriptionQueue.append(contentsOf: jobs)
         page = .fileTranscription
         if !isProcessingFileTranscriptionQueue, let first = fileTranscriptionQueue.first {
-            fileTranscriptionState = .running(fileName: first.url.lastPathComponent)
+            fileTranscriptionState = .running(fileName: first.url.lastPathComponent, progress: nil)
         }
         processFileTranscriptionQueue()
     }
@@ -335,10 +337,11 @@ final class AppState {
                 let label = remaining > 0
                     ? "\(job.url.lastPathComponent) (noch \(remaining))"
                     : job.url.lastPathComponent
-                fileTranscriptionState = .running(fileName: label)
+                currentFileTranscriptionLabel = label
+                fileTranscriptionState = .running(fileName: label, progress: nil)
 
                 do {
-                    let text = try await transcribeAudioFile(at: job.url)
+                    let text = try await transcribeAudioFile(at: job.url, reportProgress: true)
                     guard !text.isEmpty else {
                         fileTranscriptionState = .failed("Keine Sprache in „\(job.url.lastPathComponent)“ erkannt.")
                         continue
@@ -379,6 +382,9 @@ final class AppState {
     func resetFileTranscription() {
         fileTranscriptionTask?.cancel()
         fileTranscriptionTask = nil
+        fileTranscriptionQueue.removeAll()
+        fileTranscriptionWrittenOutputs.removeAll()
+        isProcessingFileTranscriptionQueue = false
         fileTranscriptionState = .idle
         page = .main
     }
@@ -397,7 +403,7 @@ final class AppState {
 
     /// Transkribiert eine Datei über eine Kopie (Original bleibt unangetastet,
     /// da der Online-Pfad die Eingabedatei nach Abschluss löscht).
-    private func transcribeAudioFile(at url: URL) async throws -> String {
+    private func transcribeAudioFile(at url: URL, reportProgress: Bool = false) async throws -> String {
         let fileExtension = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("blitztext-import-\(UUID().uuidString).\(fileExtension)")
@@ -407,6 +413,16 @@ final class AppState {
 
         let text: String
         if appSettings.secureLocalModeEnabled {
+            // Fortschritt nebenläufig pollen (nur lokal — Online liefert keinen).
+            let progressPoll: Task<Void, Never>? = reportProgress ? Task { @MainActor in
+                while !Task.isCancelled {
+                    let fraction = await LocalTranscriptionService.shared.currentProgressFraction()
+                    applyFileTranscriptionProgress(fraction)
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                }
+            } : nil
+            defer { progressPoll?.cancel() }
+
             text = try await LocalTranscriptionService.shared.transcribe(
                 audioURL: tempURL,
                 language: transcriptionSettings.language,
@@ -422,20 +438,24 @@ final class AppState {
         return TranscriptionQualityService.cleanedTranscript(text)
     }
 
+    /// Aktualisiert die Fortschrittsanzeige während der laufenden Datei-Transkription.
+    private func applyFileTranscriptionProgress(_ fraction: Double) {
+        guard case .running = fileTranscriptionState else { return }
+        fileTranscriptionState = .running(
+            fileName: currentFileTranscriptionLabel,
+            progress: fraction > 0.001 ? min(fraction, 1.0) : nil
+        )
+    }
+
     /// Schreibt das Transkript als .txt neben das Original; Fallback ~/Downloads.
     /// Überschreibt nichts — hängt bei Bedarf -1, -2 … an.
     @discardableResult
     private func writeTranscript(_ text: String, forSource sourceURL: URL) -> URL? {
         let base = sourceURL.deletingPathExtension().lastPathComponent
+        let exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
 
         func uniqueURL(in directory: URL) -> URL {
-            var target = directory.appendingPathComponent(base + ".txt")
-            var index = 1
-            while FileManager.default.fileExists(atPath: target.path) {
-                target = directory.appendingPathComponent("\(base)-\(index).txt")
-                index += 1
-            }
-            return target
+            TranscriptFileNaming.uniqueURL(forBase: base, in: directory, fileExists: exists)
         }
 
         let primaryTarget = uniqueURL(in: sourceURL.deletingLastPathComponent())

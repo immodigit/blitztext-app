@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BlitztextCore
 
 struct SettingsContentView: View {
     @Bindable var appState: AppState
@@ -56,8 +57,6 @@ private struct SectionLabel: View {
 // MARK: - Access Settings (Tab 1: Zugang)
 
 struct AccessSettingsView: View {
-    private static let openAIAPIKeyPattern = #"^sk-[A-Za-z0-9_-]{20,}$"#
-
     @Bindable var appState: AppState
 
     private enum FieldFocus {
@@ -392,7 +391,7 @@ struct AccessSettingsView: View {
             apiKeyErrorText = "Bitte trage deinen OpenAI API Key ein."
             return
         }
-        guard trimmedAPIKey.range(of: Self.openAIAPIKeyPattern, options: .regularExpression) != nil else {
+        guard OpenAIKeyValidator.isPlausible(trimmedAPIKey) else {
             apiKeyErrorText = "Das sieht nicht nach einem OpenAI API Key aus (beginnt mit „sk-“)."
             return
         }
@@ -426,7 +425,7 @@ struct AccessSettingsView: View {
 
         let firstLine = rawText.components(separatedBy: .newlines).first ?? rawText
         let trimmedKey = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmedKey.range(of: Self.openAIAPIKeyPattern, options: .regularExpression) != nil else {
+        guard OpenAIKeyValidator.isPlausible(trimmedKey) else {
             apiKeyErrorText = "Zwischenablage enthält keinen plausiblen OpenAI API Key."
             return
         }

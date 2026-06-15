@@ -255,6 +255,11 @@ actor LocalTranscriptionService {
         }
     }
 
+    /// Fortschritt der laufenden Transkription (0…1), für die Fortschrittsanzeige.
+    func currentProgressFraction() -> Double {
+        whisperKit?.progress.fractionCompleted ?? 0
+    }
+
     func transcribe(audioURL: URL, language: String, modelName: String) async throws -> String {
         let resolvedLanguage = language.trimmingCharacters(in: .whitespacesAndNewlines)
         let decodeOptions = DecodingOptions(

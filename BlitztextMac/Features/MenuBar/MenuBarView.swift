@@ -1088,19 +1088,32 @@ struct FileTranscriptionContentView: View {
             case .idle:
                 idleView
 
-            case .running(let fileName):
+            case .running(let fileName, let progress):
                 VStack(spacing: 12) {
                     Spacer().frame(height: 24)
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .controlSize(.small)
+                    if let progress {
+                        VStack(spacing: 6) {
+                            ProgressView(value: progress)
+                                .frame(maxWidth: .infinity)
+                            Text("\(Int(progress * 100)) %")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 24)
+                    } else {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .controlSize(.small)
+                    }
                     Text("Transkribiere \u{201E}\(fileName)\u{201C} \u{2026}")
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Lange Aufnahmen k\u{00F6}nnen etwas dauern.")
+                    Text(progress == nil
+                        ? "Modell wird vorbereitet \u{2026}"
+                        : "Lange Aufnahmen k\u{00F6}nnen etwas dauern.")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                     Spacer().frame(height: 24)
