@@ -98,9 +98,23 @@ for bundle in "$BUILD_DIR"/*.bundle; do
     cp -R "$bundle" "$DEST/Contents/Resources/"
 done
 
-# Ad-hoc signieren mit Entitlements (Mikrofon, Netzwerk)
-echo "🔏 Signiere lokale Development-App ad-hoc (nicht notarisiert) ..."
-codesign --force --sign - \
+# Signatur-Identität wählen:
+# Wenn eine stabile selbstsignierte Identität existiert, damit signieren — dann
+# überleben Bedienungshilfen-Freigabe und Keychain-Zugriff jeden Rebuild.
+# Sonst Ad-hoc-Fallback (z. B. auf fremden Macs / upstream).
+# Überschreibbar via BLITZTEXT_SIGN_IDENTITY.
+SIGN_IDENTITY="${BLITZTEXT_SIGN_IDENTITY:-Blitztext Local Dev}"
+if security find-certificate -c "$SIGN_IDENTITY" >/dev/null 2>&1; then
+    CODESIGN_ID="$SIGN_IDENTITY"
+    echo "🔏 Signiere mit stabiler Identität: \"$CODESIGN_ID\""
+else
+    CODESIGN_ID="-"
+    echo "🔏 Signiere lokale Development-App ad-hoc (nicht notarisiert) ..."
+    echo "   Hinweis: Ohne stabile Identität wird die Bedienungshilfen-Freigabe nach jedem Build verworfen."
+    echo "   Stabile Signatur einrichten: ./scripts/create-signing-identity.sh"
+fi
+
+codesign --force --sign "$CODESIGN_ID" \
     --entitlements "$RESOURCES_SRC/BlitztextMac.entitlements" \
     "$DEST"
 
@@ -115,7 +129,7 @@ if [ "$INSTALL_APP" = true ]; then
     fi
     rm -rf "$INSTALL_DEST"
     cp -R "$DEST" "$INSTALL_DEST"
-    codesign --force --sign - \
+    codesign --force --sign "$CODESIGN_ID" \
         --entitlements "$RESOURCES_SRC/BlitztextMac.entitlements" \
         "$INSTALL_DEST"
     RUN_TARGET="$INSTALL_DEST"
