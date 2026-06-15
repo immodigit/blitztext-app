@@ -20,6 +20,15 @@ packages:
     exactVersion: 0.18.0
 
 targets:
+  # Reine, UI-freie Logik (auch vom SPM-Test-Runner genutzt). Als eigenes
+  # Modul, damit `import BlitztextCore` sowohl im Xcode- als auch im SPM-Build
+  # funktioniert.
+  BlitztextCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Core
+
   BlitztextMac:
     type: application
     platform: macOS
@@ -46,6 +55,7 @@ targets:
         COMBINE_HIDPI_IMAGES: true
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
+      - target: BlitztextCore
       - package: ArgmaxOSS
         product: WhisperKit
     entitlements:
