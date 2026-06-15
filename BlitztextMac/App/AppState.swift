@@ -56,6 +56,8 @@ final class AppState {
     private var activeLaunchSource: WorkflowLaunchSource = .manual
     private var activePasteTarget: PasteTarget?
     private var lastPopoverPasteTarget: PasteTarget?
+    private var pasteboardRestoreItems: [NSPasteboardItem]?
+    private var pasteboardRestoreChangeCount: Int?
     private var menuBarStatusResetTask: Task<Void, Never>?
     private var workflowCleanupTask: Task<Void, Never>?
 
@@ -573,10 +575,52 @@ final class AppState {
     private func writeSensitiveTextToPasteboard(_ text: String) {
         let pasteboard = NSPasteboard.general
 
+        // Vorherigen Zwischenablage-Inhalt sichern, um ihn nach erfolgreichem
+        // Einfügen wiederherzustellen (sonst geht die Nutzer-Zwischenablage verloren).
+        pasteboardRestoreItems = snapshotPasteboardItems(pasteboard)
+
         pasteboard.clearContents()
         pasteboard.declareTypes([.string, Self.concealedPasteboardType], owner: nil)
         pasteboard.setString(text, forType: .string)
         pasteboard.setString("", forType: Self.concealedPasteboardType)
+        pasteboardRestoreChangeCount = pasteboard.changeCount
+    }
+
+    /// Tiefe Kopie aller Zwischenablage-Einträge (alle Typen), damit sie nach
+    /// dem Einfügen unverändert zurückgeschrieben werden können.
+    private func snapshotPasteboardItems(_ pasteboard: NSPasteboard) -> [NSPasteboardItem] {
+        (pasteboard.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
+        }
+    }
+
+    /// Stellt die gesicherte Zwischenablage wieder her — aber nur, wenn das
+    /// Einfügen wirklich lief und der Nutzer seither nichts Neues kopiert hat.
+    private func scheduleClipboardRestore() {
+        guard let items = pasteboardRestoreItems,
+              let expectedChangeCount = pasteboardRestoreChangeCount else {
+            return
+        }
+        // Snapshot konsumieren, damit Retries ihn nicht mehrfach auslösen.
+        pasteboardRestoreItems = nil
+        pasteboardRestoreChangeCount = nil
+
+        // Kurz warten, bis die Ziel-App das Transkript per Cmd+V übernommen hat.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            let pasteboard = NSPasteboard.general
+            // Nur wiederherstellen, wenn seit dem Transkript nichts kopiert wurde.
+            guard pasteboard.changeCount == expectedChangeCount else { return }
+            pasteboard.clearContents()
+            if !items.isEmpty {
+                pasteboard.writeObjects(items)
+            }
+        }
     }
 
     func prepareForPopoverPresentation() {
@@ -846,6 +890,9 @@ final class AppState {
         keyUp?.flags = .maskCommand
         keyDown?.post(tap: .cghidEventTap)
         keyUp?.post(tap: .cghidEventTap)
+
+        // Einfügen lief — vorherige Zwischenablage wiederherstellen.
+        scheduleClipboardRestore()
     }
 
     private func captureCurrentFrontmostApp() -> PasteTarget? {
