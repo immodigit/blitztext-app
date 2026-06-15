@@ -554,15 +554,27 @@ final class AppState {
 
     func prepareForPopoverPresentation() {
         lastPopoverPasteTarget = captureCurrentFrontmostApp()
-        if let activeWorkflow, activeWorkflow.phase.isActive {
+
+        let onTransientPage = page == .workflow || page == .onboarding || page == .fileTranscription
+        let destination = PopoverRouter.destinationOnPresent(
+            workflowActive: activeWorkflow?.phase.isActive ?? false,
+            fileTranscriptionActive: fileTranscriptionState != .idle,
+            shouldShowOnboarding: shouldShowOnboarding,
+            onTransientPage: onTransientPage
+        )
+
+        switch destination {
+        case .workflow:
             page = .workflow
-        } else if shouldShowOnboarding {
+        case .fileTranscription:
+            page = .fileTranscription
+        case .onboarding:
             page = .onboarding
             markOnboardingSeen()
-        } else if page == .workflow {
+        case .main:
             page = .main
-        } else if page == .onboarding {
-            page = .main
+        case .unchanged:
+            break
         }
     }
 

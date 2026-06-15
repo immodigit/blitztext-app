@@ -66,6 +66,34 @@ do {
     check(!taken.contains(url.path), "überschreibt nie eine existierende Datei")
 }
 
+// MARK: - PopoverRouter (Feature 1: Fortschritt beim Wiederöffnen sehen)
+
+equal(
+    PopoverRouter.destinationOnPresent(workflowActive: true, fileTranscriptionActive: true, shouldShowOnboarding: true, onTransientPage: true),
+    .workflow,
+    "laufender Workflow hat Vorrang"
+)
+equal(
+    PopoverRouter.destinationOnPresent(workflowActive: false, fileTranscriptionActive: true, shouldShowOnboarding: true, onTransientPage: true),
+    .fileTranscription,
+    "laufende Datei-Transkription wird beim Öffnen wieder gezeigt"
+)
+equal(
+    PopoverRouter.destinationOnPresent(workflowActive: false, fileTranscriptionActive: false, shouldShowOnboarding: true, onTransientPage: true),
+    .onboarding,
+    "Onboarding wenn nötig"
+)
+equal(
+    PopoverRouter.destinationOnPresent(workflowActive: false, fileTranscriptionActive: false, shouldShowOnboarding: false, onTransientPage: true),
+    .main,
+    "von transienter Seite zurück auf Haupt"
+)
+equal(
+    PopoverRouter.destinationOnPresent(workflowActive: false, fileTranscriptionActive: false, shouldShowOnboarding: false, onTransientPage: false),
+    .unchanged,
+    "sonst Seite unverändert lassen"
+)
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")
