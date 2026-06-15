@@ -67,6 +67,29 @@ For automatic paste into the previous app, grant Accessibility permission in mac
 
 Blitztext does not need Full Disk Access. Auto-paste uses the Accessibility permission because the app simulates Cmd+V after putting the result on the clipboard.
 
+## 6. Rebuilding During Local Development
+
+Local builds are **ad-hoc signed**, so every rebuild produces a *new* code signature. macOS ties both the Accessibility grant and the Keychain access for your stored API key to that signature, so after a rebuild it treats the app as a different one:
+
+- The Accessibility toggle still *looks* enabled but no longer takes effect, so auto-paste silently stops working.
+- macOS prompts again for Keychain access to `app.blitztext.preview.credentials`.
+
+**Recommended fix — sign with a stable identity.** Create a self-signed code-signing identity once:
+
+```bash
+./scripts/create-signing-identity.sh
+```
+
+`build-spm.sh` then signs with that identity automatically (falling back to ad-hoc if it is absent). Because the signature no longer changes between builds, the Accessibility grant and Keychain access survive every rebuild. On the first build after creating it, click **Always Allow** on the Keychain prompt once.
+
+**Fallback without a stable identity.** If you keep ad-hoc signing, reset the stale Accessibility grant after each rebuild, then re-enable it:
+
+```bash
+tccutil reset Accessibility app.blitztext.mac
+```
+
+Restart Blitztext and grant Accessibility again (System Settings → Privacy & Security → Accessibility).
+
 ## Troubleshooting
 
 - If `xcodebuild` reports that the active developer directory is only Command Line Tools, run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
