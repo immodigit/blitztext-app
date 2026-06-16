@@ -5,6 +5,7 @@ struct WorkflowRowView: View {
     let enabled: Bool
     var customName: String? = nil
     var subtitle: String? = nil
+    var cloudWarning: Bool = false
     let action: () -> Void
 
     @State private var isHovered = false
@@ -30,10 +31,17 @@ struct WorkflowRowView: View {
                         .foregroundStyle(enabled ? .primary : .tertiary)
                         .lineLimit(1)
 
-                    Text(subtitle ?? type.subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(enabled ? .secondary : .quaternary)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        if cloudWarning {
+                            Image(systemName: "icloud.and.arrow.up")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.orange)
+                        }
+                        Text(subtitle ?? type.subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(cloudWarning ? AnyShapeStyle(.orange) : AnyShapeStyle(enabled ? .secondary : .quaternary))
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer()

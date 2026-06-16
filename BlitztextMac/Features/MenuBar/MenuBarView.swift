@@ -112,7 +112,10 @@ struct MenuBarView: View {
                         type: type,
                         enabled: enabled,
                         customName: appState.displayName(for: type),
-                        subtitle: appState.workflowSubtitle(for: type)
+                        subtitle: appState.workflowSubtitle(for: type),
+                        cloudWarning: type == .textImprover
+                            && appState.appSettings.secureLocalModeEnabled
+                            && appState.improverBoxAvailable
                     ) {
                         if type == .textImprover {
                             appState.openImproverBox()
@@ -342,6 +345,19 @@ struct MenuBarView: View {
                     Text(errorText)
                         .font(.system(size: 10.5))
                         .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Ehrlicher Geltungsbereich des lokalen Modus.
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "icloud.and.arrow.up")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    Text(appState.improverBoxAvailable
+                        ? "Transkription bleibt lokal. Blitztext+ (Umformen) sendet Text weiterhin an OpenAI."
+                        : "Transkription bleibt lokal.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

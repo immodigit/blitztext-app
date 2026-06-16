@@ -154,9 +154,12 @@ final class AppState {
         case .localTranscription:
             return "Nur lokal. Kein Server."
         case .textImprover:
-            return KeychainService.isConfigured
-                ? "Textbox: tippen oder sprechen, dann umformen."
-                : "OpenAI API Key nötig (in Einstellungen)."
+            if !KeychainService.isConfigured {
+                return "OpenAI API Key nötig (in Einstellungen)."
+            }
+            return appSettings.secureLocalModeEnabled
+                ? "Umformen geht an OpenAI – verlässt den lokalen Modus."
+                : "Textbox: tippen oder sprechen, dann umformen."
         case .dampfAblassen, .emojiText:
             if appSettings.secureLocalModeEnabled {
                 return "Im lokalen Modus pausiert."
