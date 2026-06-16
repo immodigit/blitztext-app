@@ -186,7 +186,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             case .done, .error:
                 appState.resetCurrentWorkflow()
             default:
-                appState.page = .main
+                // Datei-Transkription und die Blitztext+-Textbox bleiben erhalten,
+                // damit Fortschritt/Eingabe beim Wiederöffnen noch da sind.
+                if appState.page != .improverTextBox {
+                    appState.page = .main
+                }
             }
         }
     }

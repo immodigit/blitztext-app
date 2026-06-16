@@ -16,6 +16,8 @@ struct MenuBarView: View {
                 workflowPage
             case .fileTranscription:
                 fileTranscriptionPage
+            case .improverTextBox:
+                improverTextBoxPage
             }
         }
         .frame(width: 340)
@@ -103,14 +105,20 @@ struct MenuBarView: View {
             // Workflow list
             VStack(spacing: 0) {
                 ForEach(WorkflowType.mainMenuCases) { type in
-                    let enabled = appState.isWorkflowAvailable(type)
+                    let enabled = type == .textImprover
+                        ? appState.improverBoxAvailable
+                        : appState.isWorkflowAvailable(type)
                     WorkflowRowView(
                         type: type,
                         enabled: enabled,
                         customName: appState.displayName(for: type),
                         subtitle: appState.workflowSubtitle(for: type)
                     ) {
-                        appState.startWorkflow(type)
+                        if type == .textImprover {
+                            appState.openImproverBox()
+                        } else {
+                            appState.startWorkflow(type)
+                        }
                     }
                 }
             }
@@ -205,6 +213,49 @@ struct MenuBarView: View {
             Divider()
 
             FileTranscriptionContentView(appState: appState)
+
+            Spacer(minLength: 0)
+
+            appFooter
+        }
+    }
+
+    private var improverTextBoxPage: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    appState.resetImproverBox()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Zur\u{00FC}ck")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(SubtleButtonStyle())
+
+                Spacer()
+
+                HStack(spacing: 5) {
+                    Image(systemName: "text.alignleft")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.purple)
+                    Text(appState.displayName(for: .textImprover))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+                Color.clear.frame(width: 58, height: 18)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            ImproverTextBoxContent(appState: appState)
 
             Spacer(minLength: 0)
 
@@ -1076,6 +1127,165 @@ private func autoPasteView(text: String) -> some View {
 }
 
 // MARK: - File Transcription Content
+
+struct ImproverTextBoxContent: View {
+    @Bindable var appState: AppState
+    @State private var copied = false
+
+    private var isBusy: Bool {
+        switch appState.improverBoxPhase {
+        case .transcribing, .improving: return true
+        default: return false
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextEditor(text: $appState.improverInputText)
+                .font(.system(size: 12))
+                .frame(height: 120)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
+                .overlay(alignment: .topLeading) {
+                    if appState.improverInputText.isEmpty {
+                        Text("Text eingeben — oder \u{201E}Diktieren\u{201C} antippen und sprechen.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.quaternary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 12)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .disabled(isBusy)
+
+            HStack(spacing: 8) {
+                Button {
+                    appState.toggleImproverDictation()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: appState.improverIsRecording ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(appState.improverIsRecording ? "Stopp" : "Diktieren")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(appState.improverIsRecording ? .red : .blue)
+                }
+                .buttonStyle(SubtleButtonStyle())
+                .disabled(isBusy)
+
+                Spacer()
+
+                Button {
+                    appState.improveImproverText()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("Umformen")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.purple)
+                }
+                .buttonStyle(SubtleButtonStyle())
+                .disabled(isBusy || appState.improverIsRecording
+                    || appState.improverInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            switch appState.improverBoxPhase {
+            case .recording:
+                HStack(spacing: 6) {
+                    Image(systemName: "mic.fill").font(.system(size: 10)).foregroundStyle(.red)
+                    Text("Aufnahme läuft – \u{201E}Stopp\u{201C} zum Beenden.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            case .transcribing:
+                busyLine("Wird transkribiert \u{2026}")
+            case .improving:
+                busyLine("Text wird umgeformt \u{2026}")
+            case .failed(let message):
+                Text(message).font(.system(size: 11)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .result(let text):
+                resultSection(text: text)
+            case .idle:
+                EmptyView()
+            }
+
+            Text("\u{201E}Umformen\u{201C} sendet den Text an OpenAI — auch im lokalen Modus. Das Diktieren bleibt im lokalen Modus auf dem Gerät.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+    }
+
+    private func busyLine(_ text: String) -> some View {
+        HStack(spacing: 6) {
+            ProgressView().scaleEffect(0.6).controlSize(.small)
+            Text(text).font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func resultSection(text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ergebnis")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            ScrollView {
+                Text(text)
+                    .font(.system(size: 12))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 140)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.purple.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.purple.opacity(0.12), lineWidth: 0.5))
+
+            HStack(spacing: 8) {
+                Button {
+                    appState.pasteImproverResult()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.doc").font(.system(size: 10, weight: .bold))
+                        Text("Einfügen")
+                    }
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.blue)
+                }
+                .buttonStyle(SubtleButtonStyle())
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    withAnimation(.easeInOut(duration: 0.2)) { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                        withAnimation(.easeInOut(duration: 0.2)) { copied = false }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.system(size: 10, weight: .bold))
+                        Text(copied ? "Kopiert" : "Kopieren")
+                    }
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(copied ? .green : .blue)
+                }
+                .buttonStyle(SubtleButtonStyle())
+
+                Spacer()
+
+                Button("Als Eingabe") {
+                    appState.useImproverResultAsInput()
+                }
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                .buttonStyle(SubtleButtonStyle())
+            }
+        }
+    }
+}
 
 struct FileTranscriptionContentView: View {
     @Bindable var appState: AppState

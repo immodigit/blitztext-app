@@ -10,6 +10,17 @@ enum PopoverPage: Equatable {
     case settings
     case workflow
     case fileTranscription
+    case improverTextBox
+}
+
+/// Zustand der Blitztext+-Textbox (tippen/diktieren → umformen).
+enum ImproverBoxPhase: Equatable {
+    case idle
+    case recording
+    case transcribing
+    case improving
+    case result(String)
+    case failed(String)
 }
 
 /// Zustand der Datei-Transkription (Sprachnachricht aus einer Datei, z. B. iPhone-Memo).
@@ -49,6 +60,11 @@ final class AppState {
     private var fileTranscriptionWrittenOutputs: [URL] = []
     private var isProcessingFileTranscriptionQueue = false
     private var currentFileTranscriptionLabel = ""
+    // Blitztext+-Textbox
+    var improverInputText = ""
+    var improverBoxPhase: ImproverBoxPhase = .idle
+    private let improverRecorder = AudioRecorder()
+    private var improverTask: Task<Void, Never>?
     var localModelDownloadProgress: Double?
     var localModelDownloadStatusText: String?
     var localModelDownloadErrorText: String?
@@ -137,7 +153,11 @@ final class AppState {
             return "Online: Whisper über OpenAI."
         case .localTranscription:
             return "Nur lokal. Kein Server."
-        case .textImprover, .dampfAblassen, .emojiText:
+        case .textImprover:
+            return KeychainService.isConfigured
+                ? "Textbox: tippen oder sprechen, dann umformen."
+                : "OpenAI API Key nötig (in Einstellungen)."
+        case .dampfAblassen, .emojiText:
             if appSettings.secureLocalModeEnabled {
                 return "Im lokalen Modus pausiert."
             }
@@ -407,6 +427,125 @@ final class AppState {
         fileTranscriptionWrittenOutputs.removeAll()
         isProcessingFileTranscriptionQueue = false
         fileTranscriptionState = .idle
+        page = .main
+    }
+
+    // MARK: - Blitztext+ Textbox (tippen oder diktieren → umformen)
+
+    /// Verfügbar, sobald ein OpenAI Key hinterlegt ist — auch im lokalen Modus,
+    /// da Umformen über OpenAI läuft (es gibt kein lokales LLM).
+    var improverBoxAvailable: Bool { KeychainService.isConfigured }
+
+    var improverIsRecording: Bool { improverRecorder.isRecording }
+
+    func openImproverBox() {
+        guard improverBoxAvailable else { page = .settings; return }
+        // Die Ziel-App fürs spätere Einfügen wurde beim Öffnen des Popovers
+        // bereits in lastPopoverPasteTarget gemerkt — hier nicht neu erfassen
+        // (sonst stünde Blitztext selbst im Vordergrund).
+        improverTask?.cancel()
+        if improverRecorder.isRecording { improverRecorder.stopRecording() }
+        improverRecorder.discardRecording()
+        improverInputText = ""
+        improverBoxPhase = .idle
+        page = .improverTextBox
+    }
+
+    /// Diktat-Knopf in der Box: startet/stoppt die Aufnahme und hängt den
+    /// transkribierten Text an die Box an (lokal, wenn lokaler Modus aktiv).
+    func toggleImproverDictation() {
+        if improverRecorder.isRecording {
+            improverRecorder.stopRecording()
+            guard !TranscriptionQualityService.shouldRejectRecording(duration: improverRecorder.lastRecordingDuration) else {
+                improverRecorder.discardRecording()
+                improverBoxPhase = .idle
+                return
+            }
+            transcribeImproverDictation()
+        } else {
+            improverBoxPhase = .recording
+            improverRecorder.startRecording()
+            if let error = improverRecorder.errorMessage {
+                improverBoxPhase = .failed(error)
+            }
+        }
+    }
+
+    private func transcribeImproverDictation() {
+        guard let url = improverRecorder.recordingURL else { improverBoxPhase = .idle; return }
+        improverBoxPhase = .transcribing
+
+        let useLocal = appSettings.secureLocalModeEnabled && selectedLocalModelIsInstalled
+        let language = transcriptionSettings.language
+        let customTerms = textImprovementSettings.customTerms
+        let localModelName = selectedLocalModelName
+
+        improverTask = Task {
+            defer { try? FileManager.default.removeItem(at: url) }
+            do {
+                let raw: String
+                if useLocal {
+                    raw = try await LocalTranscriptionService.shared.transcribe(
+                        audioURL: url, language: language, modelName: localModelName
+                    )
+                } else {
+                    raw = try await TranscriptionService.transcribe(
+                        audioURL: url, customTerms: customTerms, language: language
+                    )
+                }
+                let cleaned = TranscriptionQualityService.cleanedTranscript(raw)
+                improverInputText = improverInputText.isEmpty
+                    ? cleaned
+                    : improverInputText + " " + cleaned
+                improverBoxPhase = .idle
+            } catch {
+                improverBoxPhase = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Formt den aktuellen Box-Text über dieselbe LLM-Pipeline wie Blitztext+ um.
+    func improveImproverText() {
+        let input = improverInputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else { return }
+        guard KeychainService.isConfigured else {
+            improverBoxPhase = .failed("OpenAI API Key fehlt. Bitte in den Einstellungen hinterlegen.")
+            return
+        }
+        improverBoxPhase = .improving
+        let settings = textImprovementSettings
+
+        improverTask = Task {
+            do {
+                let improved = try await LLMService.improve(text: input, settings: settings)
+                improverBoxPhase = .result(TranscriptionQualityService.cleanedTranscript(improved))
+            } catch {
+                improverBoxPhase = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Ergebnis als neuen Eingabetext übernehmen (für weiteres Umformen).
+    func useImproverResultAsInput() {
+        if case let .result(text) = improverBoxPhase {
+            improverInputText = text
+            improverBoxPhase = .idle
+        }
+    }
+
+    /// Ergebnis in die zuvor aktive App einfügen (gleicher Paste-Weg wie beim Diktat).
+    func pasteImproverResult() {
+        guard case let .result(text) = improverBoxPhase else { return }
+        pasteAtCursor(text, target: lastPopoverPasteTarget)
+        improverBoxPhase = .idle
+    }
+
+    func resetImproverBox() {
+        improverTask?.cancel()
+        if improverRecorder.isRecording { improverRecorder.stopRecording() }
+        improverRecorder.discardRecording()
+        improverInputText = ""
+        improverBoxPhase = .idle
         page = .main
     }
 
