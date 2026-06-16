@@ -60,8 +60,9 @@ final class AppState {
     private var fileTranscriptionWrittenOutputs: [URL] = []
     private var isProcessingFileTranscriptionQueue = false
     private var currentFileTranscriptionLabel = ""
-    // Blitztext+-Textbox
+    // Umformer-Textbox (Blitztext+, $%&!, :))
     var improverInputText = ""
+    var improverType: WorkflowType = .textImprover
     var improverBoxPhase: ImproverBoxPhase = .idle
     private let improverRecorder = AudioRecorder()
     private var improverTask: Task<Void, Never>?
@@ -153,18 +154,10 @@ final class AppState {
             return "Online: Whisper über OpenAI."
         case .localTranscription:
             return "Nur lokal. Kein Server."
-        case .textImprover:
-            if !KeychainService.isConfigured {
-                return "OpenAI API Key nötig (in Einstellungen)."
-            }
-            return appSettings.secureLocalModeEnabled
-                ? "Umformen geht an OpenAI – verlässt den lokalen Modus."
-                : "Textbox: tippen oder sprechen, dann umformen."
-        case .dampfAblassen, .emojiText:
-            if appSettings.secureLocalModeEnabled {
-                return "Im lokalen Modus pausiert."
-            }
-            return type.subtitle
+        case .textImprover, .dampfAblassen, .emojiText:
+            return KeychainService.isConfigured
+                ? type.subtitle
+                : "OpenAI API Key nötig (in Einstellungen)."
         }
     }
 
@@ -441,8 +434,9 @@ final class AppState {
 
     var improverIsRecording: Bool { improverRecorder.isRecording }
 
-    func openImproverBox() {
+    func openImproverBox(type: WorkflowType = .textImprover) {
         guard improverBoxAvailable else { page = .settings; return }
+        improverType = type
         // Die Ziel-App fürs spätere Einfügen wurde beim Öffnen des Popovers
         // bereits in lastPopoverPasteTarget gemerkt — hier nicht neu erfassen
         // (sonst stünde Blitztext selbst im Vordergrund).
@@ -516,11 +510,22 @@ final class AppState {
             return
         }
         improverBoxPhase = .improving
-        let settings = textImprovementSettings
+        let type = improverType
+        let improverSettings = textImprovementSettings
+        let dampfSettings = dampfAblassenSettings
+        let emojiSettings = emojiTextSettings
 
         improverTask = Task {
             do {
-                let improved = try await LLMService.improve(text: input, settings: settings)
+                let improved: String
+                switch type {
+                case .dampfAblassen:
+                    improved = try await LLMService.dampfAblassen(text: input, systemPrompt: dampfSettings.systemPrompt)
+                case .emojiText:
+                    improved = try await LLMService.addEmojis(text: input, settings: emojiSettings)
+                default:
+                    improved = try await LLMService.improve(text: input, settings: improverSettings)
+                }
                 improverBoxPhase = .result(TranscriptionQualityService.cleanedTranscript(improved))
             } catch {
                 improverBoxPhase = .failed(error.localizedDescription)

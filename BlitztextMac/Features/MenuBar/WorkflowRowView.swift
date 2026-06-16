@@ -1,11 +1,13 @@
 import SwiftUI
 
 struct WorkflowRowView: View {
+    enum DataMode { case local, cloud }
+
     let type: WorkflowType
     let enabled: Bool
     var customName: String? = nil
     var subtitle: String? = nil
-    var cloudWarning: Bool = false
+    var dataMode: DataMode? = nil
     let action: () -> Void
 
     @State private var isHovered = false
@@ -31,15 +33,13 @@ struct WorkflowRowView: View {
                         .foregroundStyle(enabled ? .primary : .tertiary)
                         .lineLimit(1)
 
-                    HStack(spacing: 4) {
-                        if cloudWarning {
-                            Image(systemName: "icloud.and.arrow.up")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.orange)
+                    HStack(spacing: 5) {
+                        if let dataMode {
+                            DataModeBadge(mode: dataMode, enabled: enabled)
                         }
                         Text(subtitle ?? type.subtitle)
                             .font(.system(size: 11))
-                            .foregroundStyle(cloudWarning ? AnyShapeStyle(.orange) : AnyShapeStyle(enabled ? .secondary : .quaternary))
+                            .foregroundStyle(enabled ? .secondary : .quaternary)
                             .lineLimit(1)
                     }
                 }
@@ -69,6 +69,29 @@ struct WorkflowRowView: View {
         }
     }
 
+}
+
+// MARK: - Data Mode Badge (Lokal / Cloud)
+
+struct DataModeBadge: View {
+    let mode: WorkflowRowView.DataMode
+    let enabled: Bool
+
+    var body: some View {
+        let isLocal = mode == .local
+        let color: Color = isLocal ? .green : .orange
+        return HStack(spacing: 2) {
+            Image(systemName: isLocal ? "lock.fill" : "icloud.fill")
+            Text(isLocal ? "Lokal" : "Cloud")
+        }
+        .font(.system(size: 8.5, weight: .bold))
+        .foregroundStyle(enabled ? AnyShapeStyle(color) : AnyShapeStyle(.quaternary))
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1.5)
+        .background(
+            Capsule().fill((enabled ? color : Color.gray).opacity(0.12))
+        )
+    }
 }
 
 // MARK: - Hotkey Badge

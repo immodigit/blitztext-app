@@ -105,7 +105,7 @@ struct MenuBarView: View {
             // Workflow list
             VStack(spacing: 0) {
                 ForEach(WorkflowType.mainMenuCases) { type in
-                    let enabled = type == .textImprover
+                    let enabled = isImprover(type)
                         ? appState.improverBoxAvailable
                         : appState.isWorkflowAvailable(type)
                     WorkflowRowView(
@@ -113,12 +113,10 @@ struct MenuBarView: View {
                         enabled: enabled,
                         customName: appState.displayName(for: type),
                         subtitle: appState.workflowSubtitle(for: type),
-                        cloudWarning: type == .textImprover
-                            && appState.appSettings.secureLocalModeEnabled
-                            && appState.improverBoxAvailable
+                        dataMode: rowDataMode(for: type)
                     ) {
-                        if type == .textImprover {
-                            appState.openImproverBox()
+                        if isImprover(type) {
+                            appState.openImproverBox(type: type)
                         } else {
                             appState.startWorkflow(type)
                         }
@@ -242,10 +240,10 @@ struct MenuBarView: View {
                 Spacer()
 
                 HStack(spacing: 5) {
-                    Image(systemName: "text.alignleft")
+                    Image(systemName: appState.improverType.icon)
                         .font(.system(size: 11))
                         .foregroundStyle(.purple)
-                    Text(appState.displayName(for: .textImprover))
+                    Text(appState.displayName(for: appState.improverType))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.primary)
                 }
@@ -263,6 +261,21 @@ struct MenuBarView: View {
             Spacer(minLength: 0)
 
             appFooter
+        }
+    }
+
+    private func isImprover(_ type: WorkflowType) -> Bool {
+        type == .textImprover || type == .dampfAblassen || type == .emojiText
+    }
+
+    private func rowDataMode(for type: WorkflowType) -> WorkflowRowView.DataMode {
+        switch type {
+        case .textImprover, .dampfAblassen, .emojiText:
+            return .cloud
+        case .localTranscription:
+            return .local
+        case .transcription:
+            return appState.appSettings.secureLocalModeEnabled ? .local : .cloud
         }
     }
 
@@ -354,7 +367,7 @@ struct MenuBarView: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.orange)
                     Text(appState.improverBoxAvailable
-                        ? "Transkription bleibt lokal. Blitztext+ (Umformen) sendet Text weiterhin an OpenAI."
+                        ? "Transkription bleibt lokal. Die Umformer (Blitztext+, $%&!, :)) senden Text an OpenAI."
                         : "Transkription bleibt lokal.")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
