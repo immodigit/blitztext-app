@@ -96,10 +96,6 @@ final class MenuBarStatusController {
 
 private enum MenuBarStatusIconRenderer {
     static func makeImage(for status: MenuBarStatus, frame: Int) -> NSImage {
-        if case .idle = status, let baseImage = baseTemplateImage() {
-            return baseImage
-        }
-
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { bounds in
             drawBaseIcon(in: bounds, status: status, frame: frame)
@@ -142,20 +138,31 @@ private enum MenuBarStatusIconRenderer {
     }
 
     private static func drawBaseIcon(in bounds: CGRect, status: MenuBarStatus, frame: Int) {
-        let stripeWidths: [CGFloat] = [12, 10, 8, 6]
-        let stripeHeight: CGFloat = 2
-        let stripeSpacing: CGFloat = 1.6
-        let totalHeight = (CGFloat(stripeWidths.count) * stripeHeight) + (CGFloat(stripeWidths.count - 1) * stripeSpacing)
-        let originY = bounds.midY - (totalHeight / 2)
-        let baseAlpha = baseAlphaValues(for: status, frame: frame)
+        // Blitz-Glyphe (Template, einfarbig). Normalisierte Punkte (y nach oben).
+        let pts: [(CGFloat, CGFloat)] = [
+            (0.56, 0.95), (0.30, 0.50), (0.48, 0.50),
+            (0.44, 0.05), (0.70, 0.52), (0.52, 0.52),
+        ]
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: bounds.minX + pts[0].0 * bounds.width,
+                              y: bounds.minY + pts[0].1 * bounds.height))
+        for p in pts.dropFirst() {
+            path.line(to: NSPoint(x: bounds.minX + p.0 * bounds.width,
+                                  y: bounds.minY + p.1 * bounds.height))
+        }
+        path.close()
+        NSColor.black.withAlphaComponent(boltAlpha(for: status, frame: frame)).setFill()
+        path.fill()
+    }
 
-        for (index, width) in stripeWidths.enumerated() {
-            let x = bounds.midX - (width / 2)
-            let y = originY + CGFloat(index) * (stripeHeight + stripeSpacing)
-            let rect = CGRect(x: x, y: y, width: width, height: stripeHeight)
-            let path = NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1)
-            NSColor.black.withAlphaComponent(baseAlpha[index]).setFill()
-            path.fill()
+    /// Volldeckend in Ruhe; sanftes Pulsieren während Aufnahme/Verarbeitung.
+    private static func boltAlpha(for status: MenuBarStatus, frame: Int) -> CGFloat {
+        switch status {
+        case .recording, .processing:
+            let pulse: [CGFloat] = [1.0, 0.78, 0.55, 0.78]
+            return pulse[frame % pulse.count]
+        default:
+            return 1.0
         }
     }
 
@@ -267,95 +274,6 @@ private enum MenuBarStatusIconRenderer {
         dotPath.fill()
     }
 
-    private static func baseAlphaValues(for status: MenuBarStatus, frame: Int) -> [CGFloat] {
-        switch status {
-        case .idle:
-            return [1.0, 0.82, 0.64, 0.46]
-        case .recording(let type):
-            return recordingAlphaValues(for: type, frame: frame)
-        case .processing(let type):
-            return processingAlphaValues(for: type, frame: frame)
-        case .success:
-            return [1.0, 0.9, 0.78, 0.62]
-        case .error:
-            return [1.0, 0.7, 0.52, 0.36]
-        }
-    }
-
-    private static func recordingAlphaValues(for type: WorkflowType, frame: Int) -> [CGFloat] {
-        switch type {
-        case .transcription, .localTranscription:
-            let patterns: [[CGFloat]] = [
-                [1.0, 0.42, 0.28, 0.18],
-                [0.82, 1.0, 0.4, 0.24],
-                [0.58, 0.86, 1.0, 0.36],
-                [0.4, 0.62, 0.88, 1.0],
-            ]
-            return patterns[frame % patterns.count]
-        case .textImprover:
-            let patterns: [[CGFloat]] = [
-                [1.0, 0.88, 0.52, 0.3],
-                [0.86, 1.0, 0.84, 0.44],
-                [0.64, 0.9, 1.0, 0.68],
-                [0.48, 0.68, 0.9, 1.0],
-            ]
-            return patterns[frame % patterns.count]
-        case .dampfAblassen:
-            let patterns: [[CGFloat]] = [
-                [1.0, 0.44, 0.78, 1.0],
-                [0.86, 0.34, 0.96, 0.9],
-                [0.72, 0.3, 1.0, 0.78],
-                [0.94, 0.4, 0.74, 1.0],
-            ]
-            return patterns[frame % patterns.count]
-        case .emojiText:
-            let patterns: [[CGFloat]] = [
-                [1.0, 0.7, 0.46, 0.28],
-                [0.78, 1.0, 0.72, 0.42],
-                [0.52, 0.82, 1.0, 0.66],
-                [0.36, 0.58, 0.84, 1.0],
-            ]
-            return patterns[frame % patterns.count]
-        }
-    }
-
-    private static func processingAlphaValues(for type: WorkflowType, frame: Int) -> [CGFloat] {
-        switch type {
-        case .transcription, .localTranscription:
-            let patterns: [[CGFloat]] = [
-                [1.0, 0.84, 0.68, 0.52],
-                [0.92, 0.8, 0.64, 0.5],
-                [0.84, 0.74, 0.6, 0.48],
-                [0.92, 0.8, 0.64, 0.5],
-            ]
-            return patterns[frame % patterns.count]
-        case .textImprover:
-            let patterns: [[CGFloat]] = [
-                [1.0, 0.76, 0.52, 0.34],
-                [0.86, 1.0, 0.74, 0.48],
-                [0.7, 0.88, 1.0, 0.72],
-                [0.56, 0.74, 0.9, 1.0],
-            ]
-            return patterns[frame % patterns.count]
-        case .dampfAblassen:
-            let patterns: [[CGFloat]] = [
-                [0.9, 0.5, 0.72, 1.0],
-                [0.78, 0.44, 0.9, 1.0],
-                [0.66, 0.38, 1.0, 0.88],
-                [0.84, 0.48, 0.78, 1.0],
-            ]
-            return patterns[frame % patterns.count]
-        case .emojiText:
-            let patterns: [[CGFloat]] = [
-                [1.0, 0.8, 0.58, 0.4],
-                [0.88, 1.0, 0.78, 0.54],
-                [0.74, 0.9, 1.0, 0.7],
-                [0.6, 0.76, 0.92, 1.0],
-            ]
-            return patterns[frame % patterns.count]
-        }
-    }
-
     private static func badgeSymbol(for type: WorkflowType) -> String {
         switch type {
         case .transcription:
@@ -371,10 +289,4 @@ private enum MenuBarStatusIconRenderer {
         }
     }
 
-    private static func baseTemplateImage() -> NSImage? {
-        guard let image = NSImage(named: "menubar_icon") else { return nil }
-        image.isTemplate = true
-        image.size = NSSize(width: 18, height: 18)
-        return image
-    }
 }
