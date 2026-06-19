@@ -1,4 +1,5 @@
 import Foundation
+import BlitztextCore
 
 enum LLMError: LocalizedError {
     case notConfigured
@@ -133,10 +134,12 @@ enum LLMService {
         switch localEngine {
         case .apple:
             if AppleFoundationRewriter.isAvailable, #available(macOS 26.0, *) {
-                return try await AppleFoundationRewriter.rewrite(text: text, instructions: systemPrompt)
+                let output = try await AppleFoundationRewriter.rewrite(text: text, instructions: systemPrompt)
+                return LocalRewriteSanitizer.clean(output)
             }
         case .ollama(let ollamaModel):
-            return try await OllamaRewriteService.rewrite(text: text, instructions: systemPrompt, model: ollamaModel)
+            let output = try await OllamaRewriteService.rewrite(text: text, instructions: systemPrompt, model: ollamaModel)
+            return LocalRewriteSanitizer.clean(output)
         case .none:
             break
         }

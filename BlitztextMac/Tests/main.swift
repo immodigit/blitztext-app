@@ -151,6 +151,39 @@ equal(
     "alle fehlgeschlagen, mehrere Einträge"
 )
 
+// MARK: - LocalRewriteSanitizer (Vorreden kleiner lokaler Modelle entfernen)
+
+equal(
+    LocalRewriteSanitizer.clean("Hier ist der verbesserte Text:\n\nEs gibt mehrere Fragen, die ich ansprechen muss."),
+    "Es gibt mehrere Fragen, die ich ansprechen muss.",
+    "entfernt deutsche Einleitung"
+)
+equal(
+    LocalRewriteSanitizer.clean("Here is the improved text: Hello world"),
+    "Hello world",
+    "entfernt englische Einleitung"
+)
+equal(
+    LocalRewriteSanitizer.clean("Hier ist die verbesserte Version:\nText"),
+    "Text",
+    "Variante 'verbesserte Version'"
+)
+equal(
+    LocalRewriteSanitizer.clean("Es gibt mehrere Fragen."),
+    "Es gibt mehrere Fragen.",
+    "Text ohne Vorrede bleibt unverändert"
+)
+equal(
+    LocalRewriteSanitizer.clean("\u{201E}Nur ein Satz.\u{201C}"),
+    "Nur ein Satz.",
+    "umschließende Anführungszeichen weg"
+)
+equal(
+    LocalRewriteSanitizer.clean("Hier ist mein Plan und so weiter."),
+    "Hier ist mein Plan und so weiter.",
+    "ohne Doppelpunkt keine Fehl-Kürzung"
+)
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")
