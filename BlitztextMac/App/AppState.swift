@@ -472,9 +472,13 @@ final class AppState {
             let result = await OllamaRewriteService.probe()
             ollamaAvailable = result.reachable && !result.models.isEmpty
             ollamaModels = result.models
-            // Eingestelltes Modell nicht vorhanden → auf erstes verfügbares wechseln.
-            if ollamaAvailable, !result.models.contains(appSettings.ollamaModelName),
-               let first = result.models.first {
+            guard ollamaAvailable else { return }
+
+            if result.models.contains("gemma3:4b"), appSettings.ollamaModelName == "qwen2.5:3b" {
+                // Einmalige Aufwertung: gemma3:4b ist im Deutschen klar zuverlässiger.
+                appSettings.ollamaModelName = "gemma3:4b"
+            } else if !result.models.contains(appSettings.ollamaModelName), let first = result.models.first {
+                // Eingestelltes Modell nicht vorhanden → auf erstes verfügbares wechseln.
                 appSettings.ollamaModelName = first
             }
         }

@@ -123,7 +123,7 @@ struct AppSettings: Codable {
     var selectedLocalTranscriptionModelName: String = LocalTranscriptionService.recommendedFastModelName
     var hasAutoSelectedFastLocalModel: Bool = false
     /// Lokales Umform-Modell über Ollama (austauschbar, z. B. qwen2.5:3b, gemma3:4b).
-    var ollamaModelName: String = "qwen2.5:3b"
+    var ollamaModelName: String = "gemma3:4b"
 
     init(
         hotkeyMode: HotkeyMode = .hold,
@@ -131,7 +131,7 @@ struct AppSettings: Codable {
         secureLocalModeEnabled: Bool = false,
         selectedLocalTranscriptionModelName: String = LocalTranscriptionService.recommendedFastModelName,
         hasAutoSelectedFastLocalModel: Bool = false,
-        ollamaModelName: String = "qwen2.5:3b"
+        ollamaModelName: String = "gemma3:4b"
     ) {
         self.hotkeyMode = hotkeyMode
         self.hasSeenOnboarding = hasSeenOnboarding
@@ -163,7 +163,7 @@ struct AppSettings: Codable {
             Bool.self,
             forKey: .hasAutoSelectedFastLocalModel
         ) ?? false
-        ollamaModelName = try container.decodeIfPresent(String.self, forKey: .ollamaModelName) ?? "qwen2.5:3b"
+        ollamaModelName = try container.decodeIfPresent(String.self, forKey: .ollamaModelName) ?? "gemma3:4b"
     }
 }
 
