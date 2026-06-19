@@ -68,18 +68,25 @@ enum LLMService {
         return URLSession(configuration: configuration)
     }()
 
+    /// Austauschbares lokales Umform-Backend.
+    enum LocalRewriteEngine: Equatable {
+        case none                  // Cloud (OpenAI)
+        case apple                 // Apples on-device Modell (macOS 26+)
+        case ollama(model: String) // Lokaler Ollama-Dienst, frei wählbares Modell
+    }
+
     static func improve(
         text: String,
         settings: TextImprovementSettings,
         model: RewriteModel = .fastEdit,
-        preferLocal: Bool = false
+        localEngine: LocalRewriteEngine = .none
     ) async throws -> String {
         try await run(
             text: text,
             systemPrompt: buildSystemPrompt(settings: settings),
             model: model,
             temperature: 0.3,
-            preferLocal: preferLocal
+            localEngine: localEngine
         )
     }
 
@@ -87,14 +94,14 @@ enum LLMService {
         text: String,
         systemPrompt: String,
         model: RewriteModel = .rageMode,
-        preferLocal: Bool = false
+        localEngine: LocalRewriteEngine = .none
     ) async throws -> String {
         try await run(
             text: text,
             systemPrompt: systemPrompt,
             model: model,
             temperature: 0.4,
-            preferLocal: preferLocal
+            localEngine: localEngine
         )
     }
 
@@ -102,29 +109,36 @@ enum LLMService {
         text: String,
         settings: EmojiTextSettings,
         model: RewriteModel = .fastEdit,
-        preferLocal: Bool = false
+        localEngine: LocalRewriteEngine = .none
     ) async throws -> String {
         try await run(
             text: text,
             systemPrompt: buildEmojiSystemPrompt(density: settings.emojiDensity),
             model: model,
             temperature: 0.3,
-            preferLocal: preferLocal
+            localEngine: localEngine
         )
     }
 
-    /// Wählt das Backend: lokal (Apple, on-device) wenn gewünscht und verfügbar,
-    /// sonst OpenAI. Bei lokalem Lauf wird bewusst NICHT still auf Cloud
-    /// zurückgefallen — sonst würde das lokale Versprechen unbemerkt gebrochen.
+    /// Wählt das Backend. Bei einem lokal gewählten Lauf wird bewusst NICHT
+    /// still auf die Cloud zurückgefallen — sonst würde das lokale Versprechen
+    /// unbemerkt gebrochen (ein Fehler wird durchgereicht).
     private static func run(
         text: String,
         systemPrompt: String,
         model: RewriteModel,
         temperature: Double,
-        preferLocal: Bool
+        localEngine: LocalRewriteEngine
     ) async throws -> String {
-        if preferLocal, AppleFoundationRewriter.isAvailable, #available(macOS 26.0, *) {
-            return try await AppleFoundationRewriter.rewrite(text: text, instructions: systemPrompt)
+        switch localEngine {
+        case .apple:
+            if AppleFoundationRewriter.isAvailable, #available(macOS 26.0, *) {
+                return try await AppleFoundationRewriter.rewrite(text: text, instructions: systemPrompt)
+            }
+        case .ollama(let ollamaModel):
+            return try await OllamaRewriteService.rewrite(text: text, instructions: systemPrompt, model: ollamaModel)
+        case .none:
+            break
         }
         return try await complete(
             text: text,

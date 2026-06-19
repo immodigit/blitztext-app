@@ -64,6 +64,8 @@ final class AppState {
     var improverInputText = ""
     var improverType: WorkflowType = .textImprover
     var improverBoxPhase: ImproverBoxPhase = .idle
+    var ollamaAvailable = false
+    var ollamaModels: [String] = []
     private let improverRecorder = AudioRecorder()
     private var improverTask: Task<Void, Never>?
     var localModelDownloadProgress: Double?
@@ -122,6 +124,7 @@ final class AppState {
         refreshAccessibilityPermission()
         autoSelectFastLocalModelIfNeeded()
         prewarmLocalTranscriptionIfNeeded()
+        refreshOllamaAvailability()
     }
 
     // MARK: - Custom Display Names
@@ -428,21 +431,44 @@ final class AppState {
 
     // MARK: - Blitztext+ Textbox (tippen oder diktieren → umformen)
 
-    /// Verfügbar, sobald ein OpenAI Key hinterlegt ODER das lokale Apple-Modell
-    /// einsatzbereit ist.
+    /// Verfügbar, sobald ein OpenAI Key hinterlegt ODER ein lokales Modell
+    /// (Apple on-device oder Ollama) einsatzbereit ist.
     var improverBoxAvailable: Bool {
-        KeychainService.isConfigured || AppleFoundationRewriter.isAvailable
+        KeychainService.isConfigured || AppleFoundationRewriter.isAvailable || ollamaAvailable
     }
 
-    /// True, wenn das Umformen gerade lokal (on-device) läuft statt über OpenAI:
-    /// im sicheren Modus und wenn Apples Modell verfügbar ist.
+    /// True, wenn das Umformen gerade lokal läuft statt über OpenAI:
+    /// im sicheren Modus und wenn ein lokales Modell (Apple oder Ollama) bereit ist.
     var improverRewriteIsLocal: Bool {
-        appSettings.secureLocalModeEnabled && AppleFoundationRewriter.isAvailable
+        appSettings.secureLocalModeEnabled && (AppleFoundationRewriter.isAvailable || ollamaAvailable)
+    }
+
+    /// Wählt das lokale Backend für den aktuellen Modus.
+    private func currentLocalRewriteEngine() -> LLMService.LocalRewriteEngine {
+        guard appSettings.secureLocalModeEnabled else { return .none }
+        if AppleFoundationRewriter.isAvailable { return .apple }
+        if ollamaAvailable { return .ollama(model: appSettings.ollamaModelName) }
+        return .none
+    }
+
+    /// Prüft asynchron, ob der lokale Ollama-Dienst läuft und Modelle hat.
+    func refreshOllamaAvailability() {
+        Task {
+            let result = await OllamaRewriteService.probe()
+            ollamaAvailable = result.reachable && !result.models.isEmpty
+            ollamaModels = result.models
+            // Eingestelltes Modell nicht vorhanden → auf erstes verfügbares wechseln.
+            if ollamaAvailable, !result.models.contains(appSettings.ollamaModelName),
+               let first = result.models.first {
+                appSettings.ollamaModelName = first
+            }
+        }
     }
 
     var improverIsRecording: Bool { improverRecorder.isRecording }
 
     func openImproverBox(type: WorkflowType = .textImprover) {
+        refreshOllamaAvailability()
         guard improverBoxAvailable else { page = .settings; return }
         improverType = type
         // Die Ziel-App fürs spätere Einfügen wurde beim Öffnen des Popovers
@@ -514,10 +540,9 @@ final class AppState {
         let input = improverInputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
 
-        let preferLocal = appSettings.secureLocalModeEnabled
-        let willRunLocal = preferLocal && AppleFoundationRewriter.isAvailable
-        guard willRunLocal || KeychainService.isConfigured else {
-            improverBoxPhase = .failed("Weder lokales Modell noch OpenAI Key verfügbar. Apple Intelligence aktivieren oder API Key hinterlegen.")
+        let engine = currentLocalRewriteEngine()
+        guard engine != .none || KeychainService.isConfigured else {
+            improverBoxPhase = .failed("Weder lokales Modell (Apple/Ollama) noch OpenAI Key verfügbar.")
             return
         }
 
@@ -532,11 +557,11 @@ final class AppState {
                 let improved: String
                 switch type {
                 case .dampfAblassen:
-                    improved = try await LLMService.dampfAblassen(text: input, systemPrompt: dampfSettings.systemPrompt, preferLocal: preferLocal)
+                    improved = try await LLMService.dampfAblassen(text: input, systemPrompt: dampfSettings.systemPrompt, localEngine: engine)
                 case .emojiText:
-                    improved = try await LLMService.addEmojis(text: input, settings: emojiSettings, preferLocal: preferLocal)
+                    improved = try await LLMService.addEmojis(text: input, settings: emojiSettings, localEngine: engine)
                 default:
-                    improved = try await LLMService.improve(text: input, settings: improverSettings, preferLocal: preferLocal)
+                    improved = try await LLMService.improve(text: input, settings: improverSettings, localEngine: engine)
                 }
                 improverBoxPhase = .result(TranscriptionQualityService.cleanedTranscript(improved))
             } catch {

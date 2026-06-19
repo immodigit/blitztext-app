@@ -1245,7 +1245,7 @@ struct ImproverTextBoxContent: View {
             }
 
             Text(appState.improverRewriteIsLocal
-                ? "Umformen läuft lokal auf dem Gerät (Apple Intelligence) — kein Netzwerk."
+                ? "Umformen läuft lokal auf dem Gerät — kein Netzwerk."
                 : "\u{201E}Umformen\u{201C} sendet den Text an OpenAI. Das Diktieren bleibt im lokalen Modus auf dem Gerät.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
