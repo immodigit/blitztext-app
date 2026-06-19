@@ -392,7 +392,7 @@ struct MenuBarView: View {
                 return appState.localModelDownloadStatusText ?? "Lokales Modell wird geladen."
             }
             if selectedModelInstalled {
-                return "Lokal mit \(appState.selectedLocalModelDisplayName)."
+                return "Nur die Transkription läuft lokal (\(appState.selectedLocalModelDisplayName))."
             }
             return "\(appState.selectedLocalModelDisplayName) ist noch nicht installiert."
         }
