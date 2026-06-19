@@ -71,39 +71,66 @@ enum LLMService {
     static func improve(
         text: String,
         settings: TextImprovementSettings,
-        model: RewriteModel = .fastEdit
+        model: RewriteModel = .fastEdit,
+        preferLocal: Bool = false
     ) async throws -> String {
-        try await complete(
+        try await run(
             text: text,
             systemPrompt: buildSystemPrompt(settings: settings),
             model: model,
-            temperature: 0.3
+            temperature: 0.3,
+            preferLocal: preferLocal
         )
     }
 
     static func dampfAblassen(
         text: String,
         systemPrompt: String,
-        model: RewriteModel = .rageMode
+        model: RewriteModel = .rageMode,
+        preferLocal: Bool = false
     ) async throws -> String {
-        try await complete(
+        try await run(
             text: text,
             systemPrompt: systemPrompt,
             model: model,
-            temperature: 0.4
+            temperature: 0.4,
+            preferLocal: preferLocal
         )
     }
 
     static func addEmojis(
         text: String,
         settings: EmojiTextSettings,
-        model: RewriteModel = .fastEdit
+        model: RewriteModel = .fastEdit,
+        preferLocal: Bool = false
     ) async throws -> String {
-        try await complete(
+        try await run(
             text: text,
             systemPrompt: buildEmojiSystemPrompt(density: settings.emojiDensity),
             model: model,
-            temperature: 0.3
+            temperature: 0.3,
+            preferLocal: preferLocal
+        )
+    }
+
+    /// Wählt das Backend: lokal (Apple, on-device) wenn gewünscht und verfügbar,
+    /// sonst OpenAI. Bei lokalem Lauf wird bewusst NICHT still auf Cloud
+    /// zurückgefallen — sonst würde das lokale Versprechen unbemerkt gebrochen.
+    private static func run(
+        text: String,
+        systemPrompt: String,
+        model: RewriteModel,
+        temperature: Double,
+        preferLocal: Bool
+    ) async throws -> String {
+        if preferLocal, AppleFoundationRewriter.isAvailable, #available(macOS 26.0, *) {
+            return try await AppleFoundationRewriter.rewrite(text: text, instructions: systemPrompt)
+        }
+        return try await complete(
+            text: text,
+            systemPrompt: systemPrompt,
+            model: model,
+            temperature: temperature
         )
     }
 

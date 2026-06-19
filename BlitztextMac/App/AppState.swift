@@ -428,9 +428,17 @@ final class AppState {
 
     // MARK: - Blitztext+ Textbox (tippen oder diktieren → umformen)
 
-    /// Verfügbar, sobald ein OpenAI Key hinterlegt ist — auch im lokalen Modus,
-    /// da Umformen über OpenAI läuft (es gibt kein lokales LLM).
-    var improverBoxAvailable: Bool { KeychainService.isConfigured }
+    /// Verfügbar, sobald ein OpenAI Key hinterlegt ODER das lokale Apple-Modell
+    /// einsatzbereit ist.
+    var improverBoxAvailable: Bool {
+        KeychainService.isConfigured || AppleFoundationRewriter.isAvailable
+    }
+
+    /// True, wenn das Umformen gerade lokal (on-device) läuft statt über OpenAI:
+    /// im sicheren Modus und wenn Apples Modell verfügbar ist.
+    var improverRewriteIsLocal: Bool {
+        appSettings.secureLocalModeEnabled && AppleFoundationRewriter.isAvailable
+    }
 
     var improverIsRecording: Bool { improverRecorder.isRecording }
 
@@ -505,10 +513,14 @@ final class AppState {
     func improveImproverText() {
         let input = improverInputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
-        guard KeychainService.isConfigured else {
-            improverBoxPhase = .failed("OpenAI API Key fehlt. Bitte in den Einstellungen hinterlegen.")
+
+        let preferLocal = appSettings.secureLocalModeEnabled
+        let willRunLocal = preferLocal && AppleFoundationRewriter.isAvailable
+        guard willRunLocal || KeychainService.isConfigured else {
+            improverBoxPhase = .failed("Weder lokales Modell noch OpenAI Key verfügbar. Apple Intelligence aktivieren oder API Key hinterlegen.")
             return
         }
+
         improverBoxPhase = .improving
         let type = improverType
         let improverSettings = textImprovementSettings
@@ -520,11 +532,11 @@ final class AppState {
                 let improved: String
                 switch type {
                 case .dampfAblassen:
-                    improved = try await LLMService.dampfAblassen(text: input, systemPrompt: dampfSettings.systemPrompt)
+                    improved = try await LLMService.dampfAblassen(text: input, systemPrompt: dampfSettings.systemPrompt, preferLocal: preferLocal)
                 case .emojiText:
-                    improved = try await LLMService.addEmojis(text: input, settings: emojiSettings)
+                    improved = try await LLMService.addEmojis(text: input, settings: emojiSettings, preferLocal: preferLocal)
                 default:
-                    improved = try await LLMService.improve(text: input, settings: improverSettings)
+                    improved = try await LLMService.improve(text: input, settings: improverSettings, preferLocal: preferLocal)
                 }
                 improverBoxPhase = .result(TranscriptionQualityService.cleanedTranscript(improved))
             } catch {

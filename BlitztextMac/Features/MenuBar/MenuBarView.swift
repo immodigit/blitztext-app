@@ -271,7 +271,7 @@ struct MenuBarView: View {
     private func rowDataMode(for type: WorkflowType) -> WorkflowRowView.DataMode {
         switch type {
         case .textImprover, .dampfAblassen, .emojiText:
-            return .cloud
+            return appState.improverRewriteIsLocal ? .local : .cloud
         case .localTranscription:
             return .local
         case .transcription:
@@ -363,12 +363,14 @@ struct MenuBarView: View {
 
                 // Ehrlicher Geltungsbereich des lokalen Modus.
                 HStack(alignment: .top, spacing: 5) {
-                    Image(systemName: "icloud.and.arrow.up")
+                    Image(systemName: appState.improverRewriteIsLocal ? "lock.fill" : "icloud.and.arrow.up")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.orange)
-                    Text(appState.improverBoxAvailable
-                        ? "Transkription bleibt lokal. Die Umformer (Blitztext+, $%&!, :)) senden Text an OpenAI."
-                        : "Transkription bleibt lokal.")
+                        .foregroundStyle(appState.improverRewriteIsLocal ? .green : .orange)
+                    Text(appState.improverRewriteIsLocal
+                        ? "Transkription und Umformen laufen lokal auf dem Gerät — kein Netzwerk."
+                        : (appState.improverBoxAvailable
+                            ? "Transkription bleibt lokal. Die Umformer (Blitztext+, $%&!, :)) senden Text an OpenAI."
+                            : "Transkription bleibt lokal."))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1242,7 +1244,9 @@ struct ImproverTextBoxContent: View {
                 EmptyView()
             }
 
-            Text("\u{201E}Umformen\u{201C} sendet den Text an OpenAI — auch im lokalen Modus. Das Diktieren bleibt im lokalen Modus auf dem Gerät.")
+            Text(appState.improverRewriteIsLocal
+                ? "Umformen läuft lokal auf dem Gerät (Apple Intelligence) — kein Netzwerk."
+                : "\u{201E}Umformen\u{201C} sendet den Text an OpenAI. Das Diktieren bleibt im lokalen Modus auf dem Gerät.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
