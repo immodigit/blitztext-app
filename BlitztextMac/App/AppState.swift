@@ -233,7 +233,10 @@ final class AppState {
         case .textImprover:
             let workflow = TextImprovementWorkflow(
                 settings: textImprovementSettings,
-                language: transcriptionSettings.language
+                language: transcriptionSettings.language,
+                transcriptionBackend: appSettings.secureLocalModeEnabled ? .local : .remote,
+                localTranscriptionModel: selectedLocalModelName,
+                localEngine: currentLocalRewriteEngine()
             )
             configureWorkflowHandlers(workflow)
             activeWorkflow = workflow
@@ -243,7 +246,10 @@ final class AppState {
             let workflow = DampfAblassenWorkflow(
                 settings: dampfAblassenSettings,
                 customTerms: textImprovementSettings.customTerms,
-                language: transcriptionSettings.language
+                language: transcriptionSettings.language,
+                transcriptionBackend: appSettings.secureLocalModeEnabled ? .local : .remote,
+                localTranscriptionModel: selectedLocalModelName,
+                localEngine: currentLocalRewriteEngine()
             )
             configureWorkflowHandlers(workflow)
             activeWorkflow = workflow
@@ -253,7 +259,10 @@ final class AppState {
             let workflow = EmojiTextWorkflow(
                 settings: emojiTextSettings,
                 customTerms: textImprovementSettings.customTerms,
-                language: transcriptionSettings.language
+                language: transcriptionSettings.language,
+                transcriptionBackend: appSettings.secureLocalModeEnabled ? .local : .remote,
+                localTranscriptionModel: selectedLocalModelName,
+                localEngine: currentLocalRewriteEngine()
             )
             configureWorkflowHandlers(workflow)
             activeWorkflow = workflow
@@ -272,7 +281,13 @@ final class AppState {
                 ? selectedLocalModelIsInstalled
                 : KeychainService.isConfigured
         case .textImprover, .dampfAblassen, .emojiText:
-            return !appSettings.secureLocalModeEnabled && KeychainService.isConfigured
+            // Im sicheren Modus per Hotkey nutzbar, wenn lokal transkribiert UND
+            // lokal umgeformt werden kann (Apple/Ollama). Sonst Cloud (Key nötig).
+            if appSettings.secureLocalModeEnabled {
+                return selectedLocalModelIsInstalled
+                    && (AppleFoundationRewriter.isAvailable || ollamaAvailable)
+            }
+            return KeychainService.isConfigured
         }
     }
 
