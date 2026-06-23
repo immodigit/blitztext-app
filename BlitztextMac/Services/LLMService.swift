@@ -214,21 +214,28 @@ enum LLMService {
         return "Du erhaeltst ein gesprochenes Transkript. Gib den Text moeglichst originalgetreu zurueck, aber fuege passende Emojis ein. \(densityInstruction) Korrigiere offensichtliche Sprach- und Grammatikfehler. Behalte den Stil und die Bedeutung bei. Gib NUR den Text mit Emojis zurueck, keine Erklaerungen."
     }
 
+    /// Schreibweise-Hilfe: NUR korrigieren, falls ein Begriff vorkommt — niemals hinzufügen.
+    private static func termsHint(_ terms: [String]) -> String {
+        guard !terms.isEmpty else { return "" }
+        return "\n\nSchreibweise: Falls — und nur falls — eines dieser Wörter im Text vorkommt, schreibe es exakt so. Füge KEINES davon von dir aus hinzu, wenn es nicht im Text steht: \(terms.joined(separator: ", "))"
+    }
+
+    /// Strikte Ausgabe: nur der fertige Text, kein Drumherum.
+    private static let strictOutputRule =
+        "\n\nGib AUSSCHLIESSLICH den fertigen Text aus. Keine Einleitung, keine Erklärung, keine Hinweise oder Anmerkungen davor oder danach, keine Markdown-Formatierung (** _ #), keine Trennlinien (---), keine Platzhalter wie [Dein Name]."
+
     private static func buildSystemPrompt(settings: TextImprovementSettings) -> String {
         if !settings.systemPrompt.isEmpty {
-            var prompt = settings.systemPrompt
-            if !settings.customTerms.isEmpty {
-                prompt += "\n\nWichtig: Diese Eigennamen und Fachbegriffe muessen exakt so geschrieben werden: \(settings.customTerms.joined(separator: ", "))"
-            }
-            return prompt
+            return settings.systemPrompt + termsHint(settings.customTerms) + strictOutputRule
         }
 
         var prompt = """
         Du bist ein Lektor und Schreibassistent. Verbessere den folgenden Text:
         - Korrigiere Rechtschreibung und Grammatik
         - Verbessere die Formulierung und den Lesefluss
-        - Behalte die urspruengliche Bedeutung bei
-        - Gib NUR den verbesserten Text zurueck, keine Erklaerungen
+        - Behalte die ursprüngliche Bedeutung und die Sprache bei
+        - Behalte die Anrede bei (aus „du" wird kein „Sie" und umgekehrt)
+        - Verdrehe die Aussage nicht und erfinde keine zusätzlichen Fakten
         """
 
         switch settings.tone {
@@ -237,17 +244,13 @@ enum LLMService {
         case .neutral:
             prompt += "\n- Verwende einen neutralen, klaren Ton"
         case .casual:
-            prompt += "\n- Verwende einen lockeren, natuerlichen Ton"
-        }
-
-        if !settings.customTerms.isEmpty {
-            prompt += "\n\nWichtig: Diese Eigennamen und Fachbegriffe muessen exakt so geschrieben werden: \(settings.customTerms.joined(separator: ", "))"
+            prompt += "\n- Verwende einen lockeren, natürlichen Ton"
         }
 
         if !settings.context.isEmpty {
             prompt += "\n\nKontext: \(settings.context)"
         }
 
-        return prompt
+        return prompt + termsHint(settings.customTerms) + strictOutputRule
     }
 }
