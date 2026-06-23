@@ -474,11 +474,12 @@ final class AppState {
             ollamaModels = result.models
             guard ollamaAvailable else { return }
 
-            if result.models.contains("gemma3:4b"), appSettings.ollamaModelName == "qwen2.5:3b" {
-                // Einmalige Aufwertung: gemma3:4b ist im Deutschen klar zuverlässiger.
-                appSettings.ollamaModelName = "gemma3:4b"
+            // Einmalige Aufwertung der Auto-Defaults auf qwen2.5:7b (bestes Deutsch
+            // bei Bedeutung + Anrede). Eine bewusst andere Wahl würde nicht hierher fallen.
+            let autoDefaults: Set<String> = ["qwen2.5:3b", "gemma3:4b"]
+            if result.models.contains("qwen2.5:7b"), autoDefaults.contains(appSettings.ollamaModelName) {
+                appSettings.ollamaModelName = "qwen2.5:7b"
             } else if !result.models.contains(appSettings.ollamaModelName), let first = result.models.first {
-                // Eingestelltes Modell nicht vorhanden → auf erstes verfügbares wechseln.
                 appSettings.ollamaModelName = first
             }
         }

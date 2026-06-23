@@ -82,9 +82,11 @@ enum LLMService {
         model: RewriteModel = .fastEdit,
         localEngine: LocalRewriteEngine = .none
     ) async throws -> String {
+        // Eigennamen-Liste nur an die Cloud (GPT setzt sie korrekt nur bei Vorkommen ein).
+        // Lokale Modelle neigen dazu, die Begriffe fälschlich einzubauen — daher dort weglassen.
         try await run(
             text: text,
-            systemPrompt: buildSystemPrompt(settings: settings),
+            systemPrompt: buildSystemPrompt(settings: settings, includeTerms: localEngine == .none),
             model: model,
             temperature: 0.3,
             localEngine: localEngine
@@ -224,9 +226,10 @@ enum LLMService {
     private static let strictOutputRule =
         "\n\nGib AUSSCHLIESSLICH den fertigen Text aus. Keine Einleitung, keine Erklärung, keine Hinweise oder Anmerkungen davor oder danach, keine Markdown-Formatierung (** _ #), keine Trennlinien (---), keine Platzhalter wie [Dein Name]."
 
-    private static func buildSystemPrompt(settings: TextImprovementSettings) -> String {
+    private static func buildSystemPrompt(settings: TextImprovementSettings, includeTerms: Bool = true) -> String {
+        let terms = includeTerms ? settings.customTerms : []
         if !settings.systemPrompt.isEmpty {
-            return settings.systemPrompt + termsHint(settings.customTerms) + strictOutputRule
+            return settings.systemPrompt + termsHint(terms) + strictOutputRule
         }
 
         var prompt = """
@@ -251,6 +254,6 @@ enum LLMService {
             prompt += "\n\nKontext: \(settings.context)"
         }
 
-        return prompt + termsHint(settings.customTerms) + strictOutputRule
+        return prompt + termsHint(terms) + strictOutputRule
     }
 }
