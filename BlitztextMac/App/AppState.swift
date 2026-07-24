@@ -85,8 +85,14 @@ final class AppState {
         didSet {
             saveSettings()
             prewarmLocalTranscriptionIfNeeded()
+            if appSettings.historyLimit != oldValue.historyLimit {
+                trimHistoryToLimit()
+            }
         }
     }
+
+    /// Lokaler Verlauf der letzten Ergebnisse (neueste zuerst). Bleibt auf dem Gerät.
+    var transcriptHistory: [TranscriptHistoryEntry] = []
     var transcriptionSettings: TranscriptionSettings {
         didSet { saveSettings() }
     }
@@ -115,18 +121,19 @@ final class AppState {
         activeWorkflow?.phase ?? .idle
     }
 
-    init() {
-        self.appSettings = Self.loadAppSettings()
-        self.transcriptionSettings = Self.loadTranscriptionSettings()
-        self.textImprovementSettings = Self.loadTextImprovementSettings()
-        self.dampfAblassenSettings = Self.loadDampfAblassenSettings()
-        self.emojiTextSettings = Self.loadEmojiTextSettings()
     /// Aktueller Mikrofon-Pegel des laufenden Workflows (0…1) für das
     /// sprachreaktive Status-Overlay. 0, wenn nichts aufnimmt.
     var liveAudioLevel: Float {
         activeWorkflow?.audioLevel ?? 0
     }
 
+    init() {
+        self.appSettings = Self.loadAppSettings()
+        self.transcriptionSettings = Self.loadTranscriptionSettings()
+        self.textImprovementSettings = Self.loadTextImprovementSettings()
+        self.dampfAblassenSettings = Self.loadDampfAblassenSettings()
+        self.emojiTextSettings = Self.loadEmojiTextSettings()
+        self.transcriptHistory = Self.loadHistory()
         refreshAccessibilityPermission()
         autoSelectFastLocalModelIfNeeded()
         prewarmLocalTranscriptionIfNeeded()
@@ -937,6 +944,78 @@ final class AppState {
         return try? JSONDecoder().decode(SettingsContainer.self, from: data)
     }
 
+    // MARK: - Transcript History
+
+    /// Legt ein Ergebnis oben in den Verlauf. Verhindert Verlust, wenn der Text
+    /// ins falsche Feld gelandet ist. Doppelte direkt aufeinanderfolgende
+    /// Ergebnisse werden zusammengefasst.
+    private func recordInHistory(_ text: String, type: WorkflowType?) {
+        let limit = appSettings.historyLimit
+        guard limit > 0, let type else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if transcriptHistory.first?.text == trimmed {
+            return
+        }
+
+        let entry = TranscriptHistoryEntry(text: trimmed, type: type, date: Date())
+        transcriptHistory.insert(entry, at: 0)
+        if transcriptHistory.count > limit {
+            transcriptHistory.removeLast(transcriptHistory.count - limit)
+        }
+        saveHistory()
+    }
+
+    /// Kopiert einen Verlaufseintrag in die Zwischenablage, damit der Nutzer ihn
+    /// selbst ins gewünschte Feld einfügen kann (kein blindes Auto-Paste).
+    func copyHistoryEntry(_ entry: TranscriptHistoryEntry) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(entry.text, forType: .string)
+    }
+
+    func deleteHistoryEntry(_ entry: TranscriptHistoryEntry) {
+        transcriptHistory.removeAll { $0.id == entry.id }
+        saveHistory()
+    }
+
+    func clearHistory() {
+        guard !transcriptHistory.isEmpty else { return }
+        transcriptHistory.removeAll()
+        saveHistory()
+    }
+
+    private func trimHistoryToLimit() {
+        let limit = appSettings.historyLimit
+        if limit <= 0 {
+            if !transcriptHistory.isEmpty {
+                transcriptHistory.removeAll()
+                saveHistory()
+            }
+            return
+        }
+        if transcriptHistory.count > limit {
+            transcriptHistory.removeLast(transcriptHistory.count - limit)
+            saveHistory()
+        }
+    }
+
+    private func saveHistory() {
+        try? AppSupportPaths.ensureAppSupportDirectoryExists()
+        if transcriptHistory.isEmpty {
+            try? FileManager.default.removeItem(at: AppSupportPaths.historyURL)
+            return
+        }
+        if let data = try? JSONEncoder().encode(transcriptHistory) {
+            try? data.write(to: AppSupportPaths.historyURL)
+        }
+    }
+
+    private static func loadHistory() -> [TranscriptHistoryEntry] {
+        guard let data = try? Data(contentsOf: AppSupportPaths.historyURL) else { return [] }
+        return (try? JSONDecoder().decode([TranscriptHistoryEntry].self, from: data)) ?? []
+    }
+
     func refreshAccessibilityPermission() {
         accessibilityPermissionGranted = AccessibilityPermissionService.currentStatus()
     }
@@ -978,6 +1057,7 @@ final class AppState {
     }
 
     private func handleWorkflowOutput(_ text: String) {
+        recordInHistory(text, type: activeWorkflow?.type)
         pasteAtCursor(text, target: activePasteTarget)
         if activeLaunchSource == .hotkeyBackground {
             page = .main

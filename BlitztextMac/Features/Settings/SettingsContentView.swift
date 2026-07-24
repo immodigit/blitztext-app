@@ -640,6 +640,47 @@ struct CustomizeSettingsView: View {
                 }
             }
 
+            // MARK: Verlauf
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel(text: "Verlauf")
+
+                HStack {
+                    Text("Letzte Ergebnisse merken")
+                        .font(.system(size: 11.5))
+                    Spacer()
+                    Stepper(
+                        value: Binding(
+                            get: { appState.appSettings.historyLimit },
+                            set: { appState.appSettings.historyLimit = $0 }
+                        ),
+                        in: 0...AppSettings.maxHistoryLimit
+                    ) {
+                        Text(appState.appSettings.historyLimit == 0
+                            ? "Aus"
+                            : "\(appState.appSettings.historyLimit)")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .monospacedDigit()
+                            .frame(minWidth: 28, alignment: .trailing)
+                    }
+                    .controlSize(.small)
+                }
+
+                Text(appState.appSettings.historyLimit == 0
+                    ? "Verlauf ist aus. Ergebnisse werden nicht aufbewahrt."
+                    : "Rettet Text, der versehentlich ins falsche Feld ging. Tippen kopiert ihn zurück in die Zwischenablage. Bleibt als Klartext lokal auf dem Gerät (kein Server) — bei sensiblen Inhalten niedrig halten oder auf „Aus\u{201C}.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !appState.transcriptHistory.isEmpty {
+                    Button("Verlauf jetzt löschen") {
+                        appState.clearHistory()
+                    }
+                    .controlSize(.small)
+                    .font(.system(size: 11))
+                }
+            }
+
             // MARK: Blitztext+
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel(text: "Blitztext+")

@@ -132,6 +132,13 @@ struct MenuBarView: View {
                     .padding(.bottom, 6)
             }
 
+            if appState.appSettings.historyLimit > 0 && !appState.transcriptHistory.isEmpty {
+                HistorySection(appState: appState)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 2)
+                    .padding(.bottom, 6)
+            }
+
             appFooter
         }
     }
@@ -822,6 +829,108 @@ struct MenuBarView: View {
         case .dampfAblassen: return .orange
         case .emojiText: return .cyan
         }
+    }
+}
+
+// MARK: - History Section
+
+/// Zeigt die letzten Ergebnisse direkt auf der Hauptseite. Ein Tippen kopiert
+/// den Text in die Zwischenablage — Rettung, falls er ins falsche Feld ging.
+struct HistorySection: View {
+    @Bindable var appState: AppState
+    @State private var copiedID: UUID?
+
+    /// Im Menü nur die obersten paar zeigen, damit es kompakt bleibt.
+    private static let maxVisible = 4
+
+    private var visibleEntries: [TranscriptHistoryEntry] {
+        Array(appState.transcriptHistory.prefix(Self.maxVisible))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("ZULETZT")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Leeren") {
+                    appState.clearHistory()
+                }
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .buttonStyle(SubtleButtonStyle())
+            }
+
+            VStack(spacing: 4) {
+                ForEach(visibleEntries) { entry in
+                    row(for: entry)
+                }
+            }
+        }
+    }
+
+    private func row(for entry: TranscriptHistoryEntry) -> some View {
+        let isCopied = copiedID == entry.id
+        return Button {
+            appState.copyHistoryEntry(entry)
+            withAnimation(.easeInOut(duration: 0.2)) { copiedID = entry.id }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if copiedID == entry.id { copiedID = nil }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isCopied ? "checkmark" : entry.type.icon)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(isCopied ? Color.green : iconColor(entry.type))
+                    .frame(width: 16)
+
+                Text(entry.text)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 4)
+
+                Text(isCopied ? "Kopiert" : relativeTime(entry.date))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(isCopied ? Color.green : Color.secondary)
+                    .fixedSize()
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.primary.opacity(0.035))
+            )
+        }
+        .buttonStyle(SubtleButtonStyle())
+        .help("Kopieren: \(entry.text)")
+    }
+
+    private func iconColor(_ type: WorkflowType) -> Color {
+        switch type {
+        case .transcription: return .blue
+        case .localTranscription: return .green
+        case .textImprover: return .purple
+        case .dampfAblassen: return .orange
+        case .emojiText: return .cyan
+        }
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 60 { return "gerade" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes) min" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours) h" }
+        let days = hours / 24
+        return "\(days) d"
     }
 }
 

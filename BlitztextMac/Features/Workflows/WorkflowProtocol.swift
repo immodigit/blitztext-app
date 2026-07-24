@@ -118,6 +118,9 @@ protocol Workflow: AnyObject, Observable {
 // MARK: - App Settings
 
 struct AppSettings: Codable {
+    /// Obergrenze für den lokalen Transkript-Verlauf.
+    static let maxHistoryLimit = 20
+
     var hotkeyMode: HotkeyMode = .hold
     var hasSeenOnboarding: Bool = false
     var secureLocalModeEnabled: Bool = false
@@ -125,6 +128,8 @@ struct AppSettings: Codable {
     var hasAutoSelectedFastLocalModel: Bool = false
     /// Lokales Umform-Modell über Ollama (austauschbar, z. B. qwen2.5:3b, gemma3:4b).
     var ollamaModelName: String = "qwen2.5:7b"
+    /// Wie viele der letzten Ergebnisse lokal aufbewahrt werden (0 = aus).
+    var historyLimit: Int = 5
 
     init(
         hotkeyMode: HotkeyMode = .hold,
@@ -132,7 +137,8 @@ struct AppSettings: Codable {
         secureLocalModeEnabled: Bool = false,
         selectedLocalTranscriptionModelName: String = LocalTranscriptionService.recommendedFastModelName,
         hasAutoSelectedFastLocalModel: Bool = false,
-        ollamaModelName: String = "qwen2.5:7b"
+        ollamaModelName: String = "qwen2.5:7b",
+        historyLimit: Int = 5
     ) {
         self.hotkeyMode = hotkeyMode
         self.hasSeenOnboarding = hasSeenOnboarding
@@ -140,6 +146,7 @@ struct AppSettings: Codable {
         self.selectedLocalTranscriptionModelName = selectedLocalTranscriptionModelName
         self.hasAutoSelectedFastLocalModel = hasAutoSelectedFastLocalModel
         self.ollamaModelName = ollamaModelName
+        self.historyLimit = historyLimit
     }
 
     enum CodingKeys: String, CodingKey {
@@ -149,6 +156,7 @@ struct AppSettings: Codable {
         case selectedLocalTranscriptionModelName
         case hasAutoSelectedFastLocalModel
         case ollamaModelName
+        case historyLimit
     }
 
     init(from decoder: Decoder) throws {
@@ -165,6 +173,26 @@ struct AppSettings: Codable {
             forKey: .hasAutoSelectedFastLocalModel
         ) ?? false
         ollamaModelName = try container.decodeIfPresent(String.self, forKey: .ollamaModelName) ?? "qwen2.5:7b"
+        let decodedLimit = try container.decodeIfPresent(Int.self, forKey: .historyLimit) ?? 5
+        historyLimit = min(max(decodedLimit, 0), Self.maxHistoryLimit)
+    }
+}
+
+// MARK: - Transcript History
+
+/// Ein aufbewahrtes Ergebnis, damit ein in das falsche Feld getippter Text
+/// nicht verloren geht. Bleibt rein lokal auf dem Gerät.
+struct TranscriptHistoryEntry: Codable, Identifiable, Equatable {
+    let id: UUID
+    let text: String
+    let type: WorkflowType
+    let date: Date
+
+    init(id: UUID = UUID(), text: String, type: WorkflowType, date: Date) {
+        self.id = id
+        self.text = text
+        self.type = type
+        self.date = date
     }
 }
 
