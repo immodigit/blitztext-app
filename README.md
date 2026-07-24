@@ -8,43 +8,52 @@ This is a learning and experimentation project, not a polished product.
 
 > Preview status: bring your own OpenAI API key, no hosted backend, no warranty, no support guarantee.
 
-## Quickstart (Deutsch) — Installation in 5 Minuten
+## Installation (Deutsch)
 
-Du brauchst keine Entwickler-Erfahrung. Öffne die App **Terminal** (über die Mac-Suche: `cmd + Leertaste`, dann „Terminal" tippen) und kopiere die folgenden Befehle nacheinander hinein — jeweils mit Enter bestätigen.
+Drei Wege — vom Einfachsten zum Entwickler-Weg. Für Weg 1 und 2 brauchst du keinerlei Entwickler-Werkzeuge.
 
-**1. Apple Command Line Tools installieren** (einmalig, falls noch nicht vorhanden — es öffnet sich ein Installationsfenster):
+### Weg 1: Mit Homebrew (empfohlen)
 
 ```bash
-xcode-select --install
+brew install --cask immodigit/blitztext/blitztext
 ```
 
-**2. Blitztext herunterladen und installieren:**
+Das lädt das Developer-ID-signierte, von Apple notarisierte DMG und legt Blitztext in `/Applications` ab. Spätere Updates holst du mit `brew upgrade --cask blitztext`.
+
+### Weg 2: Ohne Homebrew — DMG-Download (nackter Mac reicht)
+
+1. Lade die neueste `Blitztext-x.y.dmg` von den [GitHub Releases](https://github.com/immodigit/blitztext-app/releases) herunter.
+2. Öffne die DMG-Datei und ziehe **Blitztext** in den Ordner **Programme**.
+3. Starte Blitztext aus dem Programme-Ordner. Die App ist notarisiert — macOS öffnet sie ohne Sicherheitswarnung. Sie erscheint **oben rechts in der Menüleiste** (nicht im Dock).
+
+### Einmalige Einrichtung (Weg 1 und 2)
+
+1. **Mikrofon erlauben**, wenn macOS danach fragt.
+2. **Bedienungshilfen erlauben** (Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen → Blitztext aktivieren), damit der Text direkt in deine App eingefügt wird.
+3. Dann hast du zwei Möglichkeiten:
+   - **Online-Modus:** In den Blitztext-Einstellungen deinen **OpenAI API Key** eintragen ([hier erstellen](https://platform.openai.com/api-keys)).
+   - **Komplett lokal — ohne OpenAI-Konto:** Im Blitztext-Menü den Schalter **„Sicherer Lokaler Modus"** aktivieren. Blitztext lädt das Sprachmodell direkt in der App herunter (einige hundert MB, einmalig). Die Transkription läuft danach vollständig auf deinem Mac — kein Netzwerk, kein Konto. Nur die Umform-Workflows (Blitztext+, $%&!, :)) brauchen weiterhin OpenAI oder lokal [Ollama](https://ollama.com).
+
+Fertig. Kürzel halten, sprechen, loslassen — der Text landet im aktiven Textfeld.
+
+### Weg 3: Aus dem Quellcode bauen (für Entwickler und Neugierige)
 
 ```bash
+xcode-select --install   # einmalig: Apple Command Line Tools
 git clone https://github.com/immodigit/blitztext-app.git
 cd blitztext-app
 ./build-spm.sh --install --run
 ```
 
-Der Build dauert beim ersten Mal ein paar Minuten. Danach startet Blitztext automatisch und erscheint als Symbol **oben rechts in der Menüleiste** (nicht im Dock).
+Der Build dauert beim ersten Mal ein paar Minuten.
 
-**3. Einmalig einrichten:**
-
-1. **Mikrofon erlauben**, wenn macOS danach fragt.
-2. **Bedienungshilfen erlauben** (Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen → Blitztext aktivieren), damit der Text direkt in deine App eingefügt wird.
-3. In den Blitztext-Einstellungen deinen **OpenAI API Key** eintragen ([hier erstellen](https://platform.openai.com/api-keys)).
-
-Fertig. Hotkey drücken, sprechen, Text erhalten.
-
-**Nach jedem Neubau:** Die App ist nur ad-hoc signiert — jeder Build bekommt eine neue Signatur, und macOS verwirft damit die Bedienungshilfen-Freigabe. Tückisch: Der alte Eintrag in den Systemeinstellungen sieht weiter aktiv aus, wirkt aber nicht mehr. Deshalb nach jedem Build einmal zurücksetzen:
+**Nur bei Source-Builds:** Die App ist dann ad-hoc signiert — jeder Build bekommt eine neue Signatur, und macOS verwirft damit die Bedienungshilfen-Freigabe. Tückisch: Der alte Eintrag in den Systemeinstellungen sieht weiter aktiv aus, wirkt aber nicht mehr. Deshalb nach jedem Build einmal zurücksetzen und neu erteilen:
 
 ```bash
 tccutil reset Accessibility app.blitztext.mac
 ```
 
-Danach Blitztext neu starten und die Freigabe unter Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen neu erteilen.
-
-> Hinweis: Dieser Weg baut die App direkt auf deinem Mac (ohne das große Xcode). Voraussetzung ist macOS 14 oder neuer. Bei Problemen siehe die ausführliche englische Anleitung unten oder [docs/setup.md](docs/setup.md).
+> Voraussetzung: macOS 14 oder neuer. Ausführliche Anleitung: [docs/setup.md](docs/setup.md).
 
 ## What It Does
 
@@ -60,7 +69,7 @@ Danach Blitztext neu starten und die Freigabe unter Systemeinstellungen → Date
 - No hosted Blitztext backend is included or provided.
 - In online mode, audio and text are sent directly from the app to the OpenAI API.
 - Optional local transcription via WhisperKit/CoreML if you install a compatible model locally.
-- `./build.sh` creates a locally ad-hoc-signed development app. No notarized release binary is provided.
+- Homebrew and GitHub-Release DMGs are Developer-ID-signed and notarized. `./build.sh` source builds are ad-hoc-signed for local development only.
 - Not production ready.
 - No warranty and no support guarantee.
 
@@ -105,7 +114,7 @@ brew install xcodegen
 ## Build And Run
 
 ```bash
-git clone https://github.com/cmagnussen/blitztext-app.git
+git clone https://github.com/immodigit/blitztext-app.git
 cd blitztext-app
 ./build.sh --run
 ```
@@ -116,7 +125,7 @@ For a local install into `/Applications`:
 ./build.sh --install --run
 ```
 
-The generated `.app` is ad-hoc signed for local development only. Do not treat it as a trusted redistributable binary. A public binary release would need Developer ID signing and notarization.
+The generated `.app` is ad-hoc signed for local development only. Do not treat it as a trusted redistributable binary — for that, use the notarized DMG from Homebrew or the [GitHub Releases](https://github.com/immodigit/blitztext-app/releases).
 
 On first launch, either paste your own OpenAI API key for online workflows or install a WhisperKit CoreML model for local transcription. Rewriting workflows still require OpenAI.
 
