@@ -90,15 +90,17 @@ rm -rf "$STAGING"
 NOTARIZED=false
 if [ -n "$NOTARY_PROFILE" ]; then
     echo "📤 [4/6] Reiche DMG zur Notarisierung ein (Keychain-Profil, kann 1–5 min dauern) ..."
-    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait --timeout 100m
     NOTARIZED=true
 elif [ -n "$NOTARY_APPLE_ID" ] && [ -n "$NOTARY_TEAM_ID" ] && [ -n "$NOTARY_PASSWORD" ]; then
     echo "📤 [4/6] Reiche DMG zur Notarisierung ein (Inline-Credentials, kann 1–5 min dauern) ..."
+    # --timeout: sauber abbrechen statt vom Job-Timeout gekillt zu werden.
+    # Die allererste Team-Submission kann bei Apple ungewöhnlich lange dauern.
     xcrun notarytool submit "$DMG" \
         --apple-id "$NOTARY_APPLE_ID" \
         --team-id "$NOTARY_TEAM_ID" \
         --password "$NOTARY_PASSWORD" \
-        --wait
+        --wait --timeout 100m
     NOTARIZED=true
 else
     echo "⏭  [4/6] Kein Notar-Zugang gesetzt – überspringe Notarisierung."

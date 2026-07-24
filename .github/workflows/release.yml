@@ -25,7 +25,10 @@ jobs:
   release:
     name: Build, sign, notarize & publish
     runs-on: macos-14
-    timeout-minutes: 45
+    # Großzügig: Die allererste Notarisierung eines neuen Teams kann bei Apple
+    # sehr lange dauern (manuelle Erstprüfung). Folge-Releases: Build ~7 min,
+    # Notarisierung typischerweise 1–5 min.
+    timeout-minutes: 120
     env:
       TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
 
