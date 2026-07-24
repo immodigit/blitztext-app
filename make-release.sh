@@ -24,7 +24,12 @@ ENTITLEMENTS="$RESOURCES_SRC/BlitztextMac.entitlements"
 APP="$SCRIPT_DIR/Blitztext.app"
 
 SIGN_IDENTITY="${BLITZTEXT_SIGN_IDENTITY:-}"
+# Notar-Zugang: entweder ein Keychain-Profil (lokal bequem) ODER Inline-
+# Credentials (für CI, wo kein Login-Keychain-Profil existiert).
 NOTARY_PROFILE="${BLITZTEXT_NOTARY_PROFILE:-}"
+NOTARY_APPLE_ID="${BLITZTEXT_NOTARY_APPLE_ID:-}"
+NOTARY_TEAM_ID="${BLITZTEXT_NOTARY_TEAM_ID:-}"
+NOTARY_PASSWORD="${BLITZTEXT_NOTARY_PASSWORD:-}"
 
 if [ -z "$SIGN_IDENTITY" ]; then
     echo "❌ BLITZTEXT_SIGN_IDENTITY fehlt."
@@ -82,15 +87,26 @@ hdiutil create -volname "Blitztext" \
     -fs HFS+ -format UDZO -ov "$DMG" >/dev/null
 rm -rf "$STAGING"
 
-if [ -z "$NOTARY_PROFILE" ]; then
-    echo "⏭  [4/6] BLITZTEXT_NOTARY_PROFILE nicht gesetzt – überspringe Notarisierung."
-    echo "    DMG ist signiert, aber NICHT notarisiert (Gatekeeper blockt beim Nutzer)."
-else
-    echo "📤 [4/6] Reiche DMG zur Notarisierung ein (kann 1–5 min dauern) ..."
+NOTARIZED=false
+if [ -n "$NOTARY_PROFILE" ]; then
+    echo "📤 [4/6] Reiche DMG zur Notarisierung ein (Keychain-Profil, kann 1–5 min dauern) ..."
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+    NOTARIZED=true
+elif [ -n "$NOTARY_APPLE_ID" ] && [ -n "$NOTARY_TEAM_ID" ] && [ -n "$NOTARY_PASSWORD" ]; then
+    echo "📤 [4/6] Reiche DMG zur Notarisierung ein (Inline-Credentials, kann 1–5 min dauern) ..."
     xcrun notarytool submit "$DMG" \
-        --keychain-profile "$NOTARY_PROFILE" \
+        --apple-id "$NOTARY_APPLE_ID" \
+        --team-id "$NOTARY_TEAM_ID" \
+        --password "$NOTARY_PASSWORD" \
         --wait
+    NOTARIZED=true
+else
+    echo "⏭  [4/6] Kein Notar-Zugang gesetzt – überspringe Notarisierung."
+    echo "    DMG ist signiert, aber NICHT notarisiert (Gatekeeper blockt beim Nutzer)."
+    echo "    Setze BLITZTEXT_NOTARY_PROFILE oder BLITZTEXT_NOTARY_APPLE_ID/TEAM_ID/PASSWORD."
+fi
 
+if [ "$NOTARIZED" = true ]; then
     echo "📎 [5/6] Hefte Notar-Ticket an DMG (Stapling) ..."
     xcrun stapler staple "$DMG"
 

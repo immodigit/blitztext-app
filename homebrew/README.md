@@ -12,7 +12,51 @@ der auf das Repo `github.com/immodigit/homebrew-blitztext` zeigt.
 
 ---
 
-## Einmalige Einrichtung (für dich als Entwickler)
+## Empfohlen: Release über GitHub Actions
+
+Der Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) baut,
+**signiert und notarisiert** das DMG in der Cloud, veröffentlicht das GitHub Release
+und aktualisiert (optional) die Cask im Tap-Repo. Du brauchst lokal dann **kein**
+Zertifikat mehr.
+
+### Einmalig: Repository-Secrets anlegen
+
+Unter `github.com/immodigit/blitztext-app` → Settings → Secrets and variables → Actions:
+
+| Secret | Inhalt |
+|---|---|
+| `MACOS_CERTIFICATE_P12` | base64 des exportierten „Developer ID Application"-Zertifikats (`.p12`) |
+| `MACOS_CERTIFICATE_PWD` | Passwort des `.p12`-Exports |
+| `NOTARY_APPLE_ID` | Apple-ID für die Notarisierung (`info@immojump.de`) |
+| `NOTARY_TEAM_ID` | 10-stellige Team-ID |
+| `NOTARY_PWD` | App-spezifisches Passwort (account.apple.com) |
+| `TAP_GITHUB_TOKEN` | *(optional)* PAT mit `repo`-Schreibrecht auf `immodigit/homebrew-blitztext` |
+
+**Zertifikat als `.p12` exportieren** (einmalig auf einem Mac mit dem Cert in der Keychain):
+
+```sh
+# Schlüsselbund → "Developer ID Application"-Eintrag + zugehörigen privaten Schlüssel
+# markieren → Rechtsklick → "2 Objekte exportieren" → .p12 mit Passwort speichern.
+base64 -i DeveloperID.p12 | pbcopy   # → als MACOS_CERTIFICATE_P12 einfügen
+```
+
+### Release auslösen
+
+```sh
+# MARKETING_VERSION in BlitztextMac/project.yml muss zum Tag passen (z. B. 1.5 → v1.5).
+git tag v1.5 && git push origin v1.5
+```
+
+Oder manuell über Actions → „Release" → „Run workflow". Der Rest läuft automatisch:
+DMG bauen → notarisieren → Release veröffentlichen → Cask aktualisieren.
+
+---
+
+## Alternative: Release von Hand (lokal)
+
+Nur nötig, wenn du **nicht** über CI baust.
+
+### Einmalige Einrichtung (für dich als Entwickler)
 
 ### 1. Voraussetzungen für die Notarisierung
 

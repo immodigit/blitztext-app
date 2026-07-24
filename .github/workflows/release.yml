@@ -1,0 +1,144 @@
+name: Release
+
+# Baut ein signiertes + notarisiertes DMG und veröffentlicht es als GitHub Release.
+# Auslöser: Tag "vX.Y" pushen  ODER  manuell über die Actions-Oberfläche.
+#
+# Benötigte Repository-Secrets:
+#   MACOS_CERTIFICATE_P12   base64 des exportierten "Developer ID Application"-Zertifikats (.p12)
+#   MACOS_CERTIFICATE_PWD   Passwort des .p12-Exports
+#   NOTARY_APPLE_ID         Apple-ID für die Notarisierung (z. B. info@immojump.de)
+#   NOTARY_TEAM_ID          10-stellige Team-ID
+#   NOTARY_PWD              App-spezifisches Passwort (account.apple.com)
+# Optional (für automatischen Cask-Update im Tap-Repo):
+#   TAP_GITHUB_TOKEN        PAT mit "repo"-Schreibrecht auf immodigit/homebrew-blitztext
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize & publish
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve & verify version
+        id: ver
+        run: |
+          V="$(grep 'MARKETING_VERSION:' BlitztextMac/project.yml | sed 's/.*"\(.*\)".*/\1/')"
+          if [ -z "$V" ]; then echo "MARKETING_VERSION nicht gefunden"; exit 1; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Version aus project.yml: $V"
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${{ github.ref_name }}" != "v$V" ]; then
+            echo "❌ Tag ${{ github.ref_name }} passt nicht zu project.yml (erwartet v$V)."
+            echo "   Erst MARKETING_VERSION angleichen, dann taggen."
+            exit 1
+          fi
+
+      - name: Import Developer ID certificate
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERT_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "❌ Secret MACOS_CERTIFICATE_P12 fehlt."
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/blitztext.keychain-db"
+          KEYCHAIN_PWD="$(openssl rand -base64 24)"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PWD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PWD" "$KEYCHAIN" >/dev/null
+          # Temp-Keychain in die Suchliste, damit codesign das Zertifikat findet.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+
+          IDENT="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')"
+          if [ -z "$IDENT" ]; then
+            echo "❌ Kein 'Developer ID Application' im importierten Zertifikat gefunden."
+            exit 1
+          fi
+          echo "Signier-Identität: $IDENT"
+          echo "SIGN_IDENTITY=$IDENT" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build, sign, notarize, package DMG
+        env:
+          BLITZTEXT_SIGN_IDENTITY: ${{ env.SIGN_IDENTITY }}
+          BLITZTEXT_NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          BLITZTEXT_NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          BLITZTEXT_NOTARY_PASSWORD: ${{ secrets.NOTARY_PWD }}
+        run: ./make-release.sh
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          DMG="Blitztext-${{ steps.ver.outputs.version }}.dmg"
+          S="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+          echo "sha256=$S" >> "$GITHUB_OUTPUT"
+          echo "$DMG  $S"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          DMG="Blitztext-$V.dmg"
+          NOTES="Automatisch gebautes, notarisiertes Release.
+
+          Installation:
+          \`\`\`
+          brew install --cask immodigit/blitztext/blitztext
+          \`\`\`
+
+          SHA256: \`${{ steps.sha.outputs.sha256 }}\`"
+          if gh release view "v$V" >/dev/null 2>&1; then
+            gh release upload "v$V" "$DMG" --clobber
+          else
+            gh release create "v$V" "$DMG" --title "Blitztext $V" --notes "$NOTES"
+          fi
+
+      - name: Update Homebrew tap
+        if: ${{ env.TAP_TOKEN != '' }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          SHA="${{ steps.sha.outputs.sha256 }}"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/immodigit/homebrew-blitztext.git" tap
+          cd tap
+          mkdir -p Casks
+          # Cask aus dem Repo übernehmen und Version/SHA setzen.
+          cp "$GITHUB_WORKSPACE/homebrew/Casks/blitztext.rb" Casks/blitztext.rb
+          sed -i '' -E "s/version \"[^\"]*\"/version \"$V\"/" Casks/blitztext.rb
+          sed -i '' -E "s/sha256 \"[^\"]*\"/sha256 \"$SHA\"/" Casks/blitztext.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Cask bereits aktuell – nichts zu committen."
+          else
+            git commit -am "Blitztext $V"
+            git push
+          fi
+
+      - name: Tap-Hinweis (wenn kein Token)
+        if: ${{ env.TAP_TOKEN == '' }}
+        run: |
+          echo "ℹ️ TAP_GITHUB_TOKEN nicht gesetzt – Cask im Tap-Repo NICHT automatisch aktualisiert."
+          echo "   Version ${{ steps.ver.outputs.version }}, SHA256 ${{ steps.sha.outputs.sha256 }}"
+          echo "   Trage beides von Hand in immodigit/homebrew-blitztext → Casks/blitztext.rb ein."
