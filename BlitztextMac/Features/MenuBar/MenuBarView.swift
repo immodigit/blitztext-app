@@ -32,15 +32,9 @@ struct MenuBarView: View {
             VStack(spacing: 0) {
                 // Top bar
                 HStack {
-                    HStack(spacing: 6) {
-                        Text("Blitztext")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-
-                        Text("macOS Preview")
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(.quaternary)
-                    }
+                    Text("Blitztext")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
 
                     Spacer()
 
@@ -88,21 +82,11 @@ struct MenuBarView: View {
                 installHintBanner
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
-                    .padding(.bottom, 6)
+                    .padding(.bottom, 2)
             }
 
-            transcriptionModePanel
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, appState.accessibilityPermissionGranted ? 6 : 4)
-
-            if !appState.accessibilityPermissionGranted {
-                accessibilityHintBanner
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 6)
-            }
-
-            // Workflow list
+            // Die Aktionen kommen zuerst — Konfiguration rückt nach unten
+            // bzw. in die Einstellungen.
             VStack(spacing: 0) {
                 ForEach(WorkflowType.mainMenuCases) { type in
                     let enabled = isImprover(type)
@@ -112,7 +96,9 @@ struct MenuBarView: View {
                         type: type,
                         enabled: enabled,
                         customName: appState.displayName(for: type),
-                        subtitle: appState.workflowSubtitle(for: type),
+                        // Untertitel nur, wenn es ein Problem zu erklären gibt —
+                        // im Normalzustand bleiben die Zeilen ruhig.
+                        subtitle: enabled ? nil : appState.workflowSubtitle(for: type),
                         dataMode: rowDataMode(for: type)
                     ) {
                         if isImprover(type) {
@@ -123,61 +109,64 @@ struct MenuBarView: View {
                     }
                 }
             }
-            .padding(.vertical, 2)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+
+            if !appState.accessibilityPermissionGranted {
+                accessibilityHintBanner
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+            }
+
+            transcriptionModeRow
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
 
             if appState.isConfigured {
                 fileTranscriptionEntry
                     .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, 6)
+                    .padding(.top, 6)
             }
 
             if appState.appSettings.historyLimit > 0 && !appState.transcriptHistory.isEmpty {
                 HistorySection(appState: appState)
                     .padding(.horizontal, 16)
-                    .padding(.top, 2)
-                    .padding(.bottom, 6)
+                    .padding(.top, 8)
             }
 
             appFooter
+                .padding(.top, 2)
         }
     }
 
+    /// Bewusst schlank: eine Zeile statt Karte — die Funktion ist sekundär
+    /// gegenüber den Diktier-Workflows.
     private var fileTranscriptionEntry: some View {
         Button {
             appState.presentFileTranscription()
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "waveform.badge.plus")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.blue)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 20)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Sprachnachricht transkribieren")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text("Audiodatei auswählen (z. B. iPhone-Memo)")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text("Sprachnachricht transkribieren")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.primary)
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
             .background(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(Color.primary.opacity(0.035))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
             )
         }
         .buttonStyle(SubtleButtonStyle())
@@ -249,7 +238,7 @@ struct MenuBarView: View {
                 HStack(spacing: 5) {
                     Image(systemName: appState.improverType.icon)
                         .font(.system(size: 11))
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(appState.improverType.color)
                     Text(appState.displayName(for: appState.improverType))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.primary)
@@ -286,27 +275,44 @@ struct MenuBarView: View {
         }
     }
 
-    private var transcriptionModePanel: some View {
-        let modelOptions = LocalTranscriptionService.modelOptions()
-        let selectedModelInstalled = appState.selectedLocalModelIsInstalled
+    /// Kompakte Modus-Zeile: zeigt, WO transkribiert wird, und schaltet um.
+    /// Modell-Auswahl und Download wohnen in den Einstellungen — hier gibt es
+    /// nur den Status und einen direkten Absprung dorthin.
+    private var transcriptionModeRow: some View {
+        let localOn = appState.appSettings.secureLocalModeEnabled
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Image(systemName: appState.appSettings.secureLocalModeEnabled ? "lock.shield.fill" : "network")
+                Image(systemName: localOn ? "lock.shield.fill" : "network")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(appState.appSettings.secureLocalModeEnabled ? .green : .blue)
+                    .foregroundStyle(localOn ? .green : .blue)
                     .frame(width: 22, height: 22)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(appState.appSettings.secureLocalModeEnabled ? "Sicherer lokaler Modus" : "Online Whisper")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(localOn ? "Transkription: lokal auf dem Gerät" : "Transkription: online (OpenAI)")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(.primary)
 
-                    Text(modePanelSubtitle(selectedModelInstalled: selectedModelInstalled))
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if localOn {
+                        Button {
+                            appState.page = .settings
+                        } label: {
+                            HStack(spacing: 3) {
+                                if !appState.selectedLocalModelIsInstalled && !appState.isDownloadingLocalModel {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 8.5))
+                                        .foregroundStyle(.orange)
+                                }
+                                Text(modeRowDetail)
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Modell in den Einstellungen verwalten")
+                    }
                 }
 
                 Spacer(minLength: 4)
@@ -327,61 +333,20 @@ struct MenuBarView: View {
                 .disabled(appState.isDownloadingLocalModel)
             }
 
-            if appState.appSettings.secureLocalModeEnabled {
-                HStack(spacing: 8) {
-                    Text("Modell")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-
-                    Picker("", selection: Binding(
-                        get: { appState.selectedLocalModelName },
-                        set: { appState.appSettings.selectedLocalTranscriptionModelName = $0 }
-                    )) {
-                        ForEach(modelOptions) { model in
-                            Text(model.shortDisplayName).tag(model.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity)
-                    .controlSize(.small)
-                    .disabled(appState.isDownloadingLocalModel)
-                }
-
-                if let progress = appState.localModelDownloadProgress {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ProgressView(value: progress)
-                        Text(appState.localModelDownloadStatusText ?? "Modell wird geladen...")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.secondary)
-                    }
-                } else if !selectedModelInstalled {
-                    Button(appState.localModelDownloadButtonTitle) {
-                        appState.installSelectedLocalModel()
-                    }
-                    .controlSize(.small)
-                }
-
-                if let errorText = appState.localModelDownloadErrorText {
-                    Text(errorText)
+            if let progress = appState.localModelDownloadProgress {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: progress)
+                    Text(appState.localModelDownloadStatusText ?? "Modell wird geladen ...")
                         .font(.system(size: 10.5))
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                // Ehrlicher Geltungsbereich des lokalen Modus.
-                HStack(alignment: .top, spacing: 5) {
-                    Image(systemName: appState.improverRewriteIsLocal ? "lock.fill" : "icloud.and.arrow.up")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(appState.improverRewriteIsLocal ? .green : .orange)
-                    Text(appState.improverRewriteIsLocal
-                        ? "Transkription und Umformen laufen lokal auf dem Gerät — kein Netzwerk."
-                        : (appState.improverBoxAvailable
-                            ? "Transkription bleibt lokal. Die Umformer (Blitztext+, $%&!, :)) senden Text an OpenAI."
-                            : "Transkription bleibt lokal."))
-                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+
+            if let errorText = appState.localModelDownloadErrorText {
+                Text(errorText)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(10)
@@ -395,18 +360,21 @@ struct MenuBarView: View {
         )
     }
 
-    private func modePanelSubtitle(selectedModelInstalled: Bool) -> String {
-        if appState.appSettings.secureLocalModeEnabled {
-            if appState.isDownloadingLocalModel {
-                return appState.localModelDownloadStatusText ?? "Lokales Modell wird geladen."
-            }
-            if selectedModelInstalled {
-                return "Nur die Transkription läuft lokal (\(appState.selectedLocalModelDisplayName))."
-            }
-            return "\(appState.selectedLocalModelDisplayName) ist noch nicht installiert."
+    private var modeRowDetail: String {
+        if appState.isDownloadingLocalModel {
+            return appState.localModelDownloadStatusText ?? "Modell wird geladen ..."
         }
-
-        return "Blitztext nutzt gerade die OpenAI-Transkription."
+        if !appState.selectedLocalModelIsInstalled {
+            return "Modell fehlt — in den Einstellungen laden"
+        }
+        // Ehrlicher Geltungsbereich: was bleibt lokal, was geht raus?
+        if appState.improverRewriteIsLocal {
+            return "\(appState.selectedLocalModelDisplayName) · alles bleibt auf dem Gerät"
+        }
+        if appState.improverBoxAvailable {
+            return "\(appState.selectedLocalModelDisplayName) · Umformer senden an OpenAI"
+        }
+        return appState.selectedLocalModelDisplayName
     }
 
     private var accessibilityHintBanner: some View {
@@ -447,13 +415,32 @@ struct MenuBarView: View {
     }
 
     private var configuredHeader: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(.green)
-                .frame(width: 7, height: 7)
-            Text("Bereit")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.primary)
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(.green)
+                    .frame(width: 7, height: 7)
+                Text("Bereit")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+            }
+
+            // Die Kern-Geste in einem Satz — sichtbar, ohne Handbuch.
+            Text(usageHint)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 28)
+        }
+    }
+
+    private var usageHint: String {
+        switch appState.appSettings.hotkeyMode {
+        case .hold:
+            return "Kürzel halten, sprechen, loslassen — der Text landet im aktiven Textfeld."
+        case .toggle:
+            return "Kürzel drücken, sprechen, nochmal drücken — der Text landet im aktiven Textfeld."
         }
     }
 
@@ -769,7 +756,7 @@ struct MenuBarView: View {
                     HStack(spacing: 5) {
                         Image(systemName: workflow.type.icon)
                             .font(.system(size: 11))
-                            .foregroundStyle(workflowIconColor(workflow.type))
+                            .foregroundStyle(workflow.type.color)
                         Text(appState.displayName(for: workflow.type))
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.primary)
@@ -780,25 +767,8 @@ struct MenuBarView: View {
 
                 Divider()
 
-                // Content
-                switch workflow.type {
-                case .transcription, .localTranscription:
-                    if let w = workflow as? TranscriptionWorkflow {
-                        TranscriptionActiveView(workflow: w)
-                    }
-                case .textImprover:
-                    if let w = workflow as? TextImprovementWorkflow {
-                        TextImproverActiveView(workflow: w)
-                    }
-                case .dampfAblassen:
-                    if let w = workflow as? DampfAblassenWorkflow {
-                        DampfAblassenActiveView(workflow: w)
-                    }
-                case .emojiText:
-                    if let w = workflow as? EmojiTextWorkflow {
-                        EmojiTextActiveView(workflow: w)
-                    }
-                }
+                // Ein gemeinsamer Aufnahme-/Verarbeitungs-View für alle Workflows.
+                WorkflowActiveView(workflow: workflow)
 
                 Spacer(minLength: 0)
 
@@ -809,26 +779,28 @@ struct MenuBarView: View {
 
     private var appFooter: some View {
         HStack {
+            Text(appVersionLabel)
+                .font(.system(size: 10))
+                .foregroundStyle(.quaternary)
+
             Spacer()
+
             Button("Beenden") {
                 NSApplication.shared.terminate(nil)
             }
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.quaternary)
             .buttonStyle(SubtleButtonStyle())
-            Spacer()
         }
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
 
-    private func workflowIconColor(_ type: WorkflowType) -> Color {
-        switch type {
-        case .transcription: return .blue
-        case .localTranscription: return .green
-        case .textImprover: return .purple
-        case .dampfAblassen: return .orange
-        case .emojiText: return .cyan
+    private var appVersionLabel: String {
+        if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+            return "Blitztext \(version)"
         }
+        return "Blitztext"
     }
 }
 
@@ -884,7 +856,7 @@ struct HistorySection: View {
             HStack(spacing: 8) {
                 Image(systemName: isCopied ? "checkmark" : entry.type.icon)
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(isCopied ? Color.green : iconColor(entry.type))
+                    .foregroundStyle(isCopied ? Color.green : entry.type.color)
                     .frame(width: 16)
 
                 Text(entry.text)
@@ -912,16 +884,6 @@ struct HistorySection: View {
         .help("Kopieren: \(entry.text)")
     }
 
-    private func iconColor(_ type: WorkflowType) -> Color {
-        switch type {
-        case .transcription: return .blue
-        case .localTranscription: return .green
-        case .textImprover: return .purple
-        case .dampfAblassen: return .orange
-        case .emojiText: return .cyan
-        }
-    }
-
     private func relativeTime(_ date: Date) -> String {
         let seconds = Int(Date().timeIntervalSince(date))
         if seconds < 60 { return "gerade" }
@@ -944,19 +906,22 @@ struct SubtleButtonStyle: ButtonStyle {
     }
 }
 
-// MARK: - Transcription Active View
+// MARK: - Workflow Active View (gemeinsam für alle Workflows)
 
-struct TranscriptionActiveView: View {
-    @Bindable var workflow: TranscriptionWorkflow
+/// Ein View für Aufnahme, Verarbeitung, Ergebnis und Fehler — identisches
+/// Verhalten für alle Workflows, Wellenform in der jeweiligen Workflow-Farbe.
+/// Ersetzt die vier zuvor kopierten, fast identischen ActiveViews.
+struct WorkflowActiveView: View {
+    let workflow: any Workflow
 
     var body: some View {
         VStack(spacing: 0) {
             switch workflow.phase {
             case .idle, .running:
                 if workflow.isRecording {
-                    recordingView(onStop: { workflow.stop() })
+                    recordingView
                 } else {
-                    processingView(message: "Wird transkribiert \u{2026}")
+                    processingStateView
                 }
 
             case .done(let text):
@@ -973,17 +938,29 @@ struct TranscriptionActiveView: View {
         .padding(.bottom, 16)
     }
 
-    @ViewBuilder
-    private func recordingView(onStop: @escaping () -> Void) -> some View {
+    private var runningMessage: String {
+        if case .running(let message) = workflow.phase, !message.isEmpty {
+            return message
+        }
+        return "Wird verarbeitet \u{2026}"
+    }
+
+    private var recordingView: some View {
         VStack(spacing: 16) {
             Spacer().frame(height: 20)
 
-            WaveformView(audioLevel: workflow.audioLevel, isRecording: true)
-                .frame(height: 44)
-                .padding(.horizontal, 24)
+            WaveformView(
+                audioLevel: workflow.audioLevel,
+                isRecording: true,
+                accentColor: workflow.type.color
+            )
+            .frame(height: 44)
+            .padding(.horizontal, 24)
 
-            // Monochrome stop button
-            Button(action: onStop) {
+            // Monochromer Stopp-Knopf
+            Button {
+                workflow.stop()
+            } label: {
                 ZStack {
                     Circle()
                         .strokeBorder(.primary.opacity(0.2), lineWidth: 1.5)
@@ -1002,241 +979,24 @@ struct TranscriptionActiveView: View {
             Spacer().frame(height: 8)
         }
     }
-}
 
-// MARK: - Text Improver Active View
-
-struct TextImproverActiveView: View {
-    @Bindable var workflow: TextImprovementWorkflow
-
-    var body: some View {
-        VStack(spacing: 0) {
-            switch workflow.phase {
-            case .idle, .running:
-                if workflow.isRecording {
-                    recordingView(onStop: { workflow.stop() })
-                } else {
-                    VStack(spacing: 12) {
-                        Spacer().frame(height: 24)
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .controlSize(.small)
-                        if case .running(let msg) = workflow.phase {
-                            Text(msg)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer().frame(height: 24)
-                    }
-                }
-
-            case .done(let text):
-                autoPasteView(text: text)
-
-            case .error(let msg):
-                errorView(message: msg) {
-                    workflow.reset()
-                    workflow.start()
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-    }
-
-    @ViewBuilder
-    private func recordingView(onStop: @escaping () -> Void) -> some View {
-        VStack(spacing: 16) {
-            Spacer().frame(height: 20)
-
-            WaveformView(audioLevel: workflow.audioLevel, isRecording: true)
-                .frame(height: 44)
-                .padding(.horizontal, 24)
-
-            // Monochrome stop button
-            Button(action: onStop) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(.primary.opacity(0.2), lineWidth: 1.5)
-                        .frame(width: 44, height: 44)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(.primary.opacity(0.7))
-                        .frame(width: 14, height: 14)
-                }
-            }
-            .buttonStyle(.plain)
-
-            Text("Ich h\u{00F6}re zu \u{2026} Klicke zum Stoppen.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-
-            Spacer().frame(height: 8)
-        }
-    }
-}
-
-// MARK: - Rage Mode Active View
-
-struct DampfAblassenActiveView: View {
-    @Bindable var workflow: DampfAblassenWorkflow
-
-    var body: some View {
-        VStack(spacing: 0) {
-            switch workflow.phase {
-            case .idle, .running:
-                if workflow.isRecording {
-                    recordingView(onStop: { workflow.stop() })
-                } else {
-                    VStack(spacing: 12) {
-                        Spacer().frame(height: 24)
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .controlSize(.small)
-                        if case .running(let msg) = workflow.phase {
-                            Text(msg)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer().frame(height: 24)
-                    }
-                }
-
-            case .done(let text):
-                autoPasteView(text: text)
-
-            case .error(let msg):
-                errorView(message: msg) {
-                    workflow.reset()
-                    workflow.start()
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-    }
-
-    @ViewBuilder
-    private func recordingView(onStop: @escaping () -> Void) -> some View {
-        VStack(spacing: 16) {
-            Spacer().frame(height: 20)
-
-            WaveformView(audioLevel: workflow.audioLevel, isRecording: true)
-                .frame(height: 44)
-                .padding(.horizontal, 24)
-
-            // Monochrome stop button
-            Button(action: onStop) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(.primary.opacity(0.2), lineWidth: 1.5)
-                        .frame(width: 44, height: 44)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(.primary.opacity(0.7))
-                        .frame(width: 14, height: 14)
-                }
-            }
-            .buttonStyle(.plain)
-
-            Text("Ich h\u{00F6}re zu \u{2026} Klicke zum Stoppen.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-
-            Spacer().frame(height: 8)
-        }
-    }
-}
-
-// MARK: - Emoji Text Active View
-
-struct EmojiTextActiveView: View {
-    @Bindable var workflow: EmojiTextWorkflow
-
-    var body: some View {
-        VStack(spacing: 0) {
-            switch workflow.phase {
-            case .idle, .running:
-                if workflow.isRecording {
-                    recordingView(onStop: { workflow.stop() })
-                } else {
-                    VStack(spacing: 12) {
-                        Spacer().frame(height: 24)
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .controlSize(.small)
-                        if case .running(let msg) = workflow.phase {
-                            Text(msg)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer().frame(height: 24)
-                    }
-                }
-
-            case .done(let text):
-                autoPasteView(text: text)
-
-            case .error(let msg):
-                errorView(message: msg) {
-                    workflow.reset()
-                    workflow.start()
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-    }
-
-    @ViewBuilder
-    private func recordingView(onStop: @escaping () -> Void) -> some View {
-        VStack(spacing: 16) {
-            Spacer().frame(height: 20)
-
-            WaveformView(audioLevel: workflow.audioLevel, isRecording: true)
-                .frame(height: 44)
-                .padding(.horizontal, 24)
-
-            // Monochrome stop button
-            Button(action: onStop) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(.primary.opacity(0.2), lineWidth: 1.5)
-                        .frame(width: 44, height: 44)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(.primary.opacity(0.7))
-                        .frame(width: 14, height: 14)
-                }
-            }
-            .buttonStyle(.plain)
-
-            Text("Ich h\u{00F6}re zu \u{2026} Klicke zum Stoppen.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-
-            Spacer().frame(height: 8)
+    private var processingStateView: some View {
+        VStack(spacing: 12) {
+            Spacer().frame(height: 24)
+            ProgressView()
+                .scaleEffect(0.7)
+                .controlSize(.small)
+            Text(runningMessage)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer().frame(height: 24)
         }
     }
 }
 
 // MARK: - Shared Result / Error Views
-
-private func processingView(message: String) -> some View {
-    VStack(spacing: 12) {
-        Spacer().frame(height: 24)
-        ProgressView()
-            .scaleEffect(0.7)
-            .controlSize(.small)
-        Text(message)
-            .font(.system(size: 11.5))
-            .foregroundStyle(.secondary)
-        Spacer().frame(height: 24)
-    }
-}
 
 private func autoPasteView(text: String) -> some View {
     VStack(spacing: 12) {

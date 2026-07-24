@@ -1,11 +1,27 @@
 import SwiftUI
 
+// MARK: - Workflow Accent Color (eine Quelle für Zeilen, Popover und HUD)
+
+extension WorkflowType {
+    var color: Color {
+        switch self {
+        case .transcription: return .blue
+        case .localTranscription: return .green
+        case .textImprover: return .purple
+        case .dampfAblassen: return .orange
+        case .emojiText: return .cyan
+        }
+    }
+}
+
 struct WorkflowRowView: View {
     enum DataMode { case local, cloud }
 
     let type: WorkflowType
     let enabled: Bool
     var customName: String? = nil
+    /// Nur gesetzt, wenn es etwas zu sagen gibt (z. B. warum die Zeile
+    /// deaktiviert ist). Im Normalfall bleibt die Zeile bewusst ruhig.
     var subtitle: String? = nil
     var dataMode: DataMode? = nil
     let action: () -> Void
@@ -15,29 +31,26 @@ struct WorkflowRowView: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                // Icon with monochrome background
+                // Icon in der Workflow-Farbe — gleiche Farbe wie im Status-HUD,
+                // damit der Nutzer Aktion und Overlay sofort zuordnet.
                 ZStack {
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.primary.opacity(isHovered ? 0.1 : 0.06))
+                        .fill(type.color.opacity(enabled ? (isHovered ? 0.22 : 0.13) : 0.06))
                         .frame(width: 36, height: 36)
 
                     Image(systemName: type.icon)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(enabled ? AnyShapeStyle(type.color) : AnyShapeStyle(.tertiary))
                 }
 
-                // Name + subtitle
                 VStack(alignment: .leading, spacing: 2) {
                     Text(customName ?? type.displayName)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(enabled ? .primary : .tertiary)
                         .lineLimit(1)
 
-                    HStack(spacing: 5) {
-                        if let dataMode {
-                            DataModeBadge(mode: dataMode, enabled: enabled)
-                        }
-                        Text(subtitle ?? type.subtitle)
+                    if let subtitle {
+                        Text(subtitle)
                             .font(.system(size: 11))
                             .foregroundStyle(enabled ? .secondary : .quaternary)
                             .lineLimit(1)
@@ -46,7 +59,10 @@ struct WorkflowRowView: View {
 
                 Spacer()
 
-                // Hotkey badge
+                if let dataMode {
+                    DataModeBadge(mode: dataMode, enabled: enabled)
+                }
+
                 HotkeyBadge(label: type.hotkeyLabel, enabled: enabled)
                     .opacity(enabled ? 1 : 0.4)
             }

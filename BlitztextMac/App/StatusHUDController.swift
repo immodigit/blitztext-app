@@ -161,11 +161,11 @@ private struct StatusHUDView: View {
         case .recording(let type):
             Image(systemName: "mic.fill")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(accentColor(type))
+                .foregroundStyle(type.color)
             WaveformView(
                 audioLevel: model.audioLevel,
                 isRecording: true,
-                accentColor: accentColor(type),
+                accentColor: type.color,
                 barCount: 22
             )
             .frame(width: 97)
@@ -198,13 +198,4 @@ private struct StatusHUDView: View {
         }
     }
 
-    private func accentColor(_ type: WorkflowType) -> Color {
-        switch type {
-        case .transcription: return .blue
-        case .localTranscription: return .green
-        case .textImprover: return .purple
-        case .dampfAblassen: return .orange
-        case .emojiText: return .cyan
-        }
-    }
 }
