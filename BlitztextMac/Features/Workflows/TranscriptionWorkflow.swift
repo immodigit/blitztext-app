@@ -41,12 +41,17 @@ final class TranscriptionWorkflow: Workflow {
     }
 
     func start() {
-        phase = .running("Aufnahme läuft ...")
+        // Erst aufnehmen, dann Phase setzen: Der Status-Handler liest beim
+        // Phasenwechsel `isRecording` — läuft die Aufnahme noch nicht, würde er
+        // fälschlich "Verarbeitung" statt "Aufnahme" melden (kein Wellenform-HUD).
         recorder.startRecording()
 
         if let error = recorder.errorMessage {
             phase = .error(error)
+            return
         }
+
+        phase = .running("Aufnahme läuft ...")
     }
 
     func stop() {

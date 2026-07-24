@@ -16,11 +16,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private let menuBarStatusController = MenuBarStatusController()
-    private let caretOverlayController = CaretActivityOverlayController()
+    private var statusHUDController: StatusHUDController!
     private var pendingFileImportPopover = false
     let appState = AppState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        statusHUDController = StatusHUDController(appState: appState)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem.button {
@@ -47,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         appState.onMenuBarStatusChange = { [weak self] status in
             self?.menuBarStatusController.update(to: status)
-            self?.caretOverlayController.update(to: status)
+            self?.statusHUDController.update(to: status)
         }
         appState.hotkeyService.start()
 

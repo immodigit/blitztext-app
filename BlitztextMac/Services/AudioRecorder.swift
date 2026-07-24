@@ -76,13 +76,19 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     }
 
     private func startMetering() {
-        levelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.audioRecorder?.updateMeters()
             let power = self.audioRecorder?.averagePower(forChannel: 0) ?? -160
-            let normalized = max(0, min(1, (power + 50) / 50))
-            self.audioLevel = normalized
+            let normalized = max(0, min(1, (power + 55) / 55))
+            // Leichte Kurve: normale Sprechlautstärke schlägt sichtbarer aus,
+            // ohne dass leise Passagen sofort auf Null fallen.
+            self.audioLevel = powf(normalized, 0.65)
         }
+        // .common statt .default: sonst friert die Pegelmessung ein, sobald
+        // macOS in den Event-Tracking-Modus wechselt (Maus über Menü, Drag).
+        RunLoop.main.add(timer, forMode: .common)
+        levelTimer = timer
     }
 
     private func stopMetering() {

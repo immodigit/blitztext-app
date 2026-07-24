@@ -5,22 +5,31 @@ import Combine
 /// Lives as a reference type so the Timer closure always reads fresh state.
 @MainActor
 final class WaveformState: ObservableObject {
-    @Published var levels: [CGFloat] = Array(repeating: 0.03, count: 40)
+    @Published var levels: [CGFloat]
 
     /// The current audio level fed from the parent -- updated on every
     /// SwiftUI body evaluation so the timer always has the latest value.
     var currentAudioLevel: Float = 0
 
+    private let barCount: Int
     private var phase: Double = 0
     private var timer: Timer?
 
+    init(barCount: Int = 40) {
+        self.barCount = barCount
+        self.levels = Array(repeating: 0.03, count: barCount)
+    }
+
     func startTimer() {
         guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.tick()
             }
         }
+        // .common: Wellenform läuft auch weiter, wenn macOS im Event-Tracking ist.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     func stopTimer() {
@@ -29,16 +38,18 @@ final class WaveformState: ObservableObject {
     }
 
     func reset() {
-        levels = Array(repeating: 0.03, count: 40)
+        levels = Array(repeating: 0.03, count: barCount)
         phase = 0
     }
 
     private func tick() {
-        phase += 0.15
+        phase += 0.22
         let base = CGFloat(currentAudioLevel)
         levels.removeFirst()
-        let jitter = CGFloat.random(in: -0.06...0.06)
-        let breathe = sin(phase) * 0.03
+        // Ausschlag skaliert mit der Lautstärke: beim Sprechen tanzen die Balken
+        // deutlich, in Sprechpausen bleibt die Linie ruhig statt zu zappeln.
+        let jitter = CGFloat.random(in: -0.22...0.22) * base
+        let breathe = sin(phase) * (0.02 + base * 0.08)
         let newLevel = max(0.03, min(1.0, base + jitter + breathe))
         levels.append(newLevel)
     }
@@ -52,8 +63,17 @@ struct WaveformView: View {
     var audioLevel: Float
     var isRecording: Bool
     var accentColor: Color = .primary
+    var barCount: Int = 40
 
-    @StateObject private var state = WaveformState()
+    @StateObject private var state: WaveformState
+
+    init(audioLevel: Float, isRecording: Bool, accentColor: Color = .primary, barCount: Int = 40) {
+        self.audioLevel = audioLevel
+        self.isRecording = isRecording
+        self.accentColor = accentColor
+        self.barCount = barCount
+        _state = StateObject(wrappedValue: WaveformState(barCount: barCount))
+    }
 
     var body: some View {
         HStack(spacing: 2) {

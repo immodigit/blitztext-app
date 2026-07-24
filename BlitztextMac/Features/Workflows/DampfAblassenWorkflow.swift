@@ -45,12 +45,16 @@ final class DampfAblassenWorkflow: Workflow {
     // MARK: - Workflow Protocol
 
     func start() {
-        phase = .running("Aufnahme läuft ...")
+        // Erst aufnehmen, dann Phase setzen (siehe TranscriptionWorkflow.start()):
+        // sonst meldet der Status-Handler "Verarbeitung" statt "Aufnahme".
         recorder.startRecording()
 
         if let error = recorder.errorMessage {
             phase = .error(error)
+            return
         }
+
+        phase = .running("Aufnahme läuft ...")
     }
 
     func stop() {

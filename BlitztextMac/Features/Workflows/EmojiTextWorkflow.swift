@@ -45,12 +45,16 @@ final class EmojiTextWorkflow: Workflow {
     // MARK: - Workflow Protocol
 
     func start() {
-        phase = .running("Aufnahme l\u{00E4}uft ...")
+        // Erst aufnehmen, dann Phase setzen (siehe TranscriptionWorkflow.start()):
+        // sonst meldet der Status-Handler "Verarbeitung" statt "Aufnahme".
         recorder.startRecording()
 
         if let error = recorder.errorMessage {
             phase = .error(error)
+            return
         }
+
+        phase = .running("Aufnahme l\u{00E4}uft ...")
     }
 
     func stop() {

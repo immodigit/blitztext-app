@@ -121,6 +121,12 @@ final class AppState {
         self.textImprovementSettings = Self.loadTextImprovementSettings()
         self.dampfAblassenSettings = Self.loadDampfAblassenSettings()
         self.emojiTextSettings = Self.loadEmojiTextSettings()
+    /// Aktueller Mikrofon-Pegel des laufenden Workflows (0…1) für das
+    /// sprachreaktive Status-Overlay. 0, wenn nichts aufnimmt.
+    var liveAudioLevel: Float {
+        activeWorkflow?.audioLevel ?? 0
+    }
+
         refreshAccessibilityPermission()
         autoSelectFastLocalModelIfNeeded()
         prewarmLocalTranscriptionIfNeeded()
