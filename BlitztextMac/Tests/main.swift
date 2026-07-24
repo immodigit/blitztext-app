@@ -25,7 +25,9 @@ func equal<T: Equatable>(_ a: T, _ b: T, _ name: String) {
 
 check(OpenAIKeyValidator.isPlausible("sk-" + String(repeating: "a", count: 25)),
       "akzeptiert plausiblen Key")
-check(OpenAIKeyValidator.isPlausible("  sk-abcdefghij1234567890ABCD  "),
+// Key als Teilstrings zusammengesetzt (wie oben), damit kein literaler
+// "sk-…"-Schlüssel im Quelltext steht und der CI-Secret-Scan nicht anschlägt.
+check(OpenAIKeyValidator.isPlausible("  sk-" + "abcdefghij1234567890ABCD  "),
       "trimmt umgebende Leerzeichen")
 check(!OpenAIKeyValidator.isPlausible(""), "lehnt leer ab")
 check(!OpenAIKeyValidator.isPlausible("hallo welt"), "lehnt beliebigen Text ab")
