@@ -22,7 +22,21 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      # Ohne PAT kann release-please nichts tun. Statt bei jedem Push rot zu
+      # werden, überspringt der Job dann sauber (grün).
+      - name: Token vorhanden?
+        id: guard
+        env:
+          TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "RELEASE_PLEASE_TOKEN fehlt – release-please übersprungen."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: googleapis/release-please-action@v4
+        if: steps.guard.outputs.enabled == 'true'
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
