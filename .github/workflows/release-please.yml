@@ -1,0 +1,29 @@
+name: release-please
+
+# Pflegt automatisch einen "Release-PR": leitet aus den Conventional-Commits
+# (fix→Patch, feat→Minor) die nächste Version ab, aktualisiert
+# MARKETING_VERSION in BlitztextMac/project.yml und schreibt den CHANGELOG.
+#
+# Beim Mergen des Release-PRs erzeugt release-please den Tag vX.Y.Z. Weil das
+# über RELEASE_PLEASE_TOKEN (PAT) läuft, löst dieser Tag-Push den Workflow
+# release.yml aus (bauen → notarisieren → veröffentlichen → Cask). Mit dem
+# Standard-GITHUB_TOKEN würde der Tag KEINEN Folge-Workflow starten.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

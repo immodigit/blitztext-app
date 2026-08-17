@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "last-release-sha": "9ac41529b4cdc25276f9d44bdd460dbe176a605a",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "include-component-in-tag": false,
+      "extra-files": [
+        { "type": "generic", "path": "BlitztextMac/project.yml" }
+      ]
+    }
+  }
+}
