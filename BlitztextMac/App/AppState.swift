@@ -736,10 +736,36 @@ final class AppState {
         }
     }
 
-    func installSelectedLocalModel() {
+    /// RAM-Warnung für ein Modell auf diesem Mac, sonst nil.
+    func localModelRAMWarning(for modelName: String) -> String? {
+        guard !LocalTranscriptionService.systemMeetsRAMRequirement(for: modelName) else {
+            return nil
+        }
+        let needed = LocalTranscriptionService.recommendedRAMGB(for: modelName)
+        let have = LocalTranscriptionService.systemRAMGB
+        let name = LocalTranscriptionModel.displayName(for: modelName)
+        return "\(name) empfiehlt \(needed) GB RAM, dieser Mac hat \(have) GB. "
+            + "Das Modell kann beim Laden abstürzen. Empfehlung: Whisper Small."
+    }
+
+    /// True, wenn das gewählte Modell zu groß für den RAM dieses Macs ist.
+    var selectedLocalModelExceedsRAM: Bool {
+        !LocalTranscriptionService.systemMeetsRAMRequirement(for: selectedLocalModelName)
+    }
+
+    /// `force`, um trotz RAM-Warnung zu laden (bewusste Nutzer-Entscheidung).
+    func installSelectedLocalModel(force: Bool = false) {
         guard !isDownloadingLocalModel else { return }
 
         let modelName = selectedLocalModelName
+
+        // RAM-Gate: Kein blinder Download eines Modells, das diesen Mac beim
+        // Laden umbringen würde. Der Nutzer muss bewusst bestätigen (force).
+        if !force, let warning = localModelRAMWarning(for: modelName) {
+            localModelDownloadErrorText = warning
+            return
+        }
+
         localModelDownloadProgress = 0
         localModelDownloadStatusText = "Download startet..."
         localModelDownloadErrorText = nil
@@ -763,7 +789,11 @@ final class AppState {
                 localModelDownloadStatusText = "\(LocalTranscriptionModel.displayName(for: modelName)) ist installiert."
                 localModelDownloadErrorText = nil
 
-                try? await LocalTranscriptionService.shared.prepare(modelName: modelName)
+                // Nach dem Download nur prewarmen, wenn der RAM reicht — sonst
+                // würde genau hier der Absturz passieren.
+                if LocalTranscriptionService.systemMeetsRAMRequirement(for: modelName) {
+                    try? await LocalTranscriptionService.shared.prepare(modelName: modelName)
+                }
             } catch {
                 localModelDownloadProgress = nil
                 localModelDownloadStatusText = nil
@@ -1051,6 +1081,16 @@ final class AppState {
         }
 
         let modelName = resolvedLocalModelName
+
+        // Schutz gegen den Start-Brick: Große Modelle (und alles, wofür der RAM
+        // nicht reicht) werden beim Start NICHT vorgeladen. Sonst kann macOS den
+        // Prozess beim Prewarm wegen Speicherdrucks killen — bei jedem Start
+        // aufs Neue. Solche Modelle laden erst bei tatsächlicher Nutzung
+        // (sichtbare Nutzer-Aktion), nie mehr blind beim Programmstart.
+        guard LocalTranscriptionService.isSafeToPrewarmOnLaunch(modelName) else {
+            return
+        }
+
         Task.detached(priority: .utility) {
             try? await LocalTranscriptionService.shared.prepare(modelName: modelName)
         }

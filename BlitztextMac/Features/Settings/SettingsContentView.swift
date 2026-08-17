@@ -579,6 +579,22 @@ struct CustomizeSettingsView: View {
                     .disabled(appState.isDownloadingLocalModel)
                 }
 
+                // RAM-Warnung: zu großes Modell für diesen Mac → Absturzgefahr.
+                if !appState.selectedLocalModelIsInstalled,
+                   let ramWarning = appState.localModelRAMWarning(for: appState.selectedLocalModelName) {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.orange)
+                        Text(ramWarning)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.09)))
+                }
+
                 if let progress = appState.localModelDownloadProgress {
                     VStack(alignment: .leading, spacing: 4) {
                         ProgressView(value: progress)
@@ -587,12 +603,15 @@ struct CustomizeSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
+                    let exceedsRAM = !appState.selectedLocalModelIsInstalled && appState.selectedLocalModelExceedsRAM
                     HStack(spacing: 10) {
-                        Button(appState.localModelDownloadButtonTitle) {
-                            appState.installSelectedLocalModel()
+                        Button(exceedsRAM ? "Trotzdem herunterladen" : appState.localModelDownloadButtonTitle) {
+                            // Bei RAM-Warnung ist der Klick die bewusste Bestätigung.
+                            appState.installSelectedLocalModel(force: exceedsRAM)
                         }
                         .controlSize(.small)
                         .disabled(appState.selectedLocalModelIsInstalled)
+                        .tint(exceedsRAM ? .orange : nil)
 
                         Link("Modellseite", destination: LocalTranscriptionService.modelPageURL(for: appState.selectedLocalModelName))
                             .font(.system(size: 10.5, weight: .medium))

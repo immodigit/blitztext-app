@@ -134,6 +134,50 @@ actor LocalTranscriptionService {
         return trimmed.isEmpty ? recommendedFastModelName : trimmed
     }
 
+    // MARK: - RAM-Anforderungen
+    //
+    // Die "MB" im Modellnamen sind die Download-Größe auf der Platte, NICHT der
+    // Speicherbedarf beim Laden. WhisperKit lädt/prewarmt das Modell über
+    // CoreML/ANE, was ein Vielfaches der Dateigröße an RAM belegt. Auf einem Mac
+    // mit zu wenig Speicher killt macOS beim Laden den Prozess (nicht abfangbar)
+    // — die App startet dann scheinbar nicht mehr. Deshalb gaten wir Download
+    // und Prewarm über diese Schwellen.
+
+    static let bytesPerGB: Double = 1_073_741_824
+
+    /// Empfohlener Mindest-RAM (in GB), um dieses Modell zuverlässig zu laden.
+    static func recommendedRAMGB(for modelName: String) -> Int {
+        let name = normalizedModelName(modelName)
+        if name.contains("large-v3") || name.contains("turbo") {
+            return 16
+        }
+        return 8
+    }
+
+    /// Physischer RAM dieses Macs in GB (gerundet).
+    static var systemRAMGB: Int {
+        Int((Double(ProcessInfo.processInfo.physicalMemory) / bytesPerGB).rounded())
+    }
+
+    /// True, wenn dieser Mac genug RAM für das Modell hat (mit kleiner Toleranz
+    /// gegen Rundung, damit ein 16-GB-Mac die 16-GB-Schwelle knapp erfüllt).
+    static func systemMeetsRAMRequirement(for modelName: String) -> Bool {
+        let systemGB = Double(ProcessInfo.processInfo.physicalMemory) / bytesPerGB
+        return systemGB + 0.5 >= Double(recommendedRAMGB(for: modelName))
+    }
+
+    /// Speicherhungrige Modelle (Large/Turbo). Diese werden nie blind beim
+    /// Programmstart vorgeladen — sonst riskiert man den Start-Brick auch auf
+    /// Macs, die die RAM-Schwelle nominell erfüllen.
+    static func isMemoryHeavyModel(_ modelName: String) -> Bool {
+        recommendedRAMGB(for: modelName) >= 16
+    }
+
+    /// Ob dieses Modell beim Start gefahrlos vorgeladen werden darf.
+    static func isSafeToPrewarmOnLaunch(_ modelName: String) -> Bool {
+        !isMemoryHeavyModel(modelName) && systemMeetsRAMRequirement(for: modelName)
+    }
+
     static func installedModels() -> [LocalTranscriptionModel] {
         let directory = AppSupportPaths.whisperKitModelsDirectoryURL
         let urls = (try? FileManager.default.contentsOfDirectory(
