@@ -24,6 +24,9 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # Für den workflow_dispatch auf release.yml. Ohne actions:write antwortet
+  # die API mit "403 Resource not accessible by integration".
+  actions: write
 
 jobs:
   release-please:
@@ -42,6 +45,15 @@ jobs:
         if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag_name }}
         run: |
-          echo "Release ${{ steps.release.outputs.tag_name }} angelegt – starte release.yml."
-          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main
+          # Auf dem Tag bauen, nicht auf main: Sonst landet im DMG der Stand,
+          # den main gerade zufällig hat, obwohl das Release auf den älteren
+          # Commit zeigt. Auf dem Tag greift zusätzlich die Versionsprüfung in
+          # release.yml (ref_type = tag).
+          echo "Release $TAG angelegt – starte release.yml auf $TAG."
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" || {
+            echo "::error::Dispatch fehlgeschlagen. Von Hand nachholen mit:"
+            echo "::error::gh workflow run release.yml --repo $GITHUB_REPOSITORY --ref $TAG"
+            exit 1
+          }
