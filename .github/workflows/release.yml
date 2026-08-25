@@ -1,7 +1,9 @@
 name: Release
 
 # Baut ein signiertes + notarisiertes DMG und veröffentlicht es als GitHub Release.
-# Auslöser: Tag "vX.Y" pushen  ODER  manuell über die Actions-Oberfläche.
+# Auslöser: automatisch von release-please, sobald der Release-PR gemergt ist
+#           (per workflow_dispatch, siehe release-please.yml)
+#           ODER  Tag "vX.Y" von Hand pushen  ODER  manuell über die Actions-Oberfläche.
 #
 # Benötigte Repository-Secrets:
 #   MACOS_CERTIFICATE_P12   base64 des exportierten "Developer ID Application"-Zertifikats (.p12)
