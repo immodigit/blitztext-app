@@ -9,8 +9,12 @@ name: Release
 #   NOTARY_APPLE_ID         Apple-ID für die Notarisierung (z. B. info@immojump.de)
 #   NOTARY_TEAM_ID          10-stellige Team-ID
 #   NOTARY_PWD              App-spezifisches Passwort (account.apple.com)
-# Optional (für automatischen Cask-Update im Tap-Repo):
-#   TAP_GITHUB_TOKEN        PAT mit "repo"-Schreibrecht auf immodigit/homebrew-blitztext
+#
+# Das Homebrew-Cask aktualisiert sich selbst: immodigit/homebrew-blitztext holt
+# Version und SHA256 stündlich aus den Releases hier (sync-cask.yml). Ein Push
+# von hier aus bräuchte ein langlebiges Token, weil das GITHUB_TOKEN nur ins
+# eigene Repository schreiben darf — deshalb zieht das Tap, statt geschoben zu
+# werden.
 
 on:
   push:
@@ -29,8 +33,6 @@ jobs:
     # sehr lange dauern (manuelle Erstprüfung). Folge-Releases: Build ~7 min,
     # Notarisierung typischerweise 1–5 min.
     timeout-minutes: 120
-    env:
-      TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
@@ -120,31 +122,3 @@ jobs:
           else
             gh release create "v$V" "$DMG" --title "Blitztext $V" --notes "$NOTES"
           fi
-
-      - name: Update Homebrew tap
-        if: ${{ env.TAP_TOKEN != '' }}
-        run: |
-          V="${{ steps.ver.outputs.version }}"
-          SHA="${{ steps.sha.outputs.sha256 }}"
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/immodigit/homebrew-blitztext.git" tap
-          cd tap
-          mkdir -p Casks
-          # Cask aus dem Repo übernehmen und Version/SHA setzen.
-          cp "$GITHUB_WORKSPACE/homebrew/Casks/blitztext.rb" Casks/blitztext.rb
-          sed -i '' -E "s/version \"[^\"]*\"/version \"$V\"/" Casks/blitztext.rb
-          sed -i '' -E "s/sha256 \"[^\"]*\"/sha256 \"$SHA\"/" Casks/blitztext.rb
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then
-            echo "Cask bereits aktuell – nichts zu committen."
-          else
-            git commit -am "Blitztext $V"
-            git push
-          fi
-
-      - name: Tap-Hinweis (wenn kein Token)
-        if: ${{ env.TAP_TOKEN == '' }}
-        run: |
-          echo "ℹ️ TAP_GITHUB_TOKEN nicht gesetzt – Cask im Tap-Repo NICHT automatisch aktualisiert."
-          echo "   Version ${{ steps.ver.outputs.version }}, SHA256 ${{ steps.sha.outputs.sha256 }}"
-          echo "   Trage beides von Hand in immodigit/homebrew-blitztext → Casks/blitztext.rb ein."
