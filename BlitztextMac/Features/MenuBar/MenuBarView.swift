@@ -4,6 +4,10 @@ import BlitztextCore
 struct MenuBarView: View {
     @Bindable var appState: AppState
 
+    /// Damit die Versionszeile beim Überfahren erkennbar wird — sonst sieht
+    /// niemand, dass sie anklickbar ist.
+    @State private var isVersionHovered = false
+
     var body: some View {
         VStack(spacing: 0) {
             switch appState.page {
@@ -781,9 +785,22 @@ struct MenuBarView: View {
 
     private var appFooter: some View {
         HStack {
-            Text(appVersionLabel)
-                .font(.system(size: 10))
-                .foregroundStyle(.quaternary)
+            // Führt zur Release-Übersicht, nicht auf die Repo-Startseite: Wer
+            // auf die eigene Versionsnummer klickt, will wissen, ob es eine
+            // neuere gibt — und was sich geändert hat.
+            Link(destination: Self.releasesURL) {
+                Text(appVersionLabel)
+                    .font(.system(size: 10))
+                    .foregroundStyle(isVersionHovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
+                    .underline(isVersionHovered)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isVersionHovered = hovering
+                }
+            }
+            .help("Alle Versionen und Änderungen auf GitHub ansehen")
 
             Spacer()
 
@@ -797,6 +814,8 @@ struct MenuBarView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
+
+    private static let releasesURL = URL(string: "https://github.com/immodigit/blitztext-app/releases")!
 
     private var appVersionLabel: String {
         if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
