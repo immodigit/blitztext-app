@@ -1,4 +1,5 @@
 import SwiftUI
+import BlitztextCore
 
 struct MenuBarView: View {
     @Bindable var appState: AppState
@@ -99,7 +100,8 @@ struct MenuBarView: View {
                         // Untertitel nur, wenn es ein Problem zu erklären gibt —
                         // im Normalzustand bleiben die Zeilen ruhig.
                         subtitle: enabled ? nil : appState.workflowSubtitle(for: type),
-                        dataMode: rowDataMode(for: type)
+                        dataMode: rowDataMode(for: type),
+                        hotkeyLabel: appState.hotkeyLabel(for: type)
                     ) {
                         if isImprover(type) {
                             appState.openImproverBox(type: type)

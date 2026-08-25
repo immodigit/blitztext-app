@@ -1,4 +1,5 @@
 import AppKit
+import BlitztextCore
 
 enum MenuBarStatus: Equatable {
     case idle

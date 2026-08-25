@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import Observation
 import OSLog
+import BlitztextCore
 
 private let transcriptionLogger = Logger(subsystem: "app.blitztext.mac", category: "Transcription")
 

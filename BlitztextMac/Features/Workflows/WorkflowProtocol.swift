@@ -1,70 +1,5 @@
 import Foundation
-
-// MARK: - Workflow Types
-
-enum WorkflowType: String, CaseIterable, Identifiable, Codable {
-    case transcription
-    case localTranscription
-    case textImprover
-    case dampfAblassen
-    case emojiText
-
-    var id: String { rawValue }
-
-    static var mainMenuCases: [WorkflowType] {
-        allCases.filter { $0 != .localTranscription }
-    }
-
-    var displayName: String {
-        switch self {
-        case .transcription: return "Blitztext"
-        case .localTranscription: return "Blitztext Lokal"
-        case .textImprover: return "Blitztext+"
-        case .dampfAblassen: return "Blitztext $%&!"
-        case .emojiText: return "Blitztext :)"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .transcription: return "mic.fill"
-        case .localTranscription: return "lock.shield.fill"
-        case .textImprover: return "text.badge.checkmark"
-        case .dampfAblassen: return "flame.fill"
-        case .emojiText: return "face.smiling"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .transcription: return "Sprache rein. Text raus."
-        case .localTranscription: return "Nur lokal. Kein Server."
-        case .textImprover: return "Geschrieben sprechen."
-        case .dampfAblassen: return "Frust rein. Entspannt raus."
-        case .emojiText: return "Text rein. Emojis dazu."
-        }
-    }
-
-    var hotkeyLabel: String {
-        switch self {
-        case .transcription: return "fn + Shift"
-        case .localTranscription: return "fn + Shift + Ctrl"
-        case .textImprover: return "fn + Control"
-        case .dampfAblassen: return "fn + Option"
-        case .emojiText: return "fn + Cmd"
-        }
-    }
-
-    var accentColor: String {
-        switch self {
-        case .transcription: return "blue"
-        case .localTranscription: return "green"
-        case .textImprover: return "purple"
-        case .dampfAblassen: return "orange"
-        case .emojiText: return "cyan"
-        }
-    }
-}
+import BlitztextCore
 
 // MARK: - Workflow State
 
@@ -130,6 +65,9 @@ struct AppSettings: Codable {
     var ollamaModelName: String = "qwen2.5:7b"
     /// Wie viele der letzten Ergebnisse lokal aufbewahrt werden (0 = aus).
     var historyLimit: Int = 5
+    /// Welche Tastenkombination welchen Workflow startet. Frei belegbar, weil
+    /// viele externe Tastaturen keine nutzbare fn-Taste haben.
+    var hotkeyBindings: HotkeyBindingSet = .default
 
     init(
         hotkeyMode: HotkeyMode = .hold,
@@ -138,7 +76,8 @@ struct AppSettings: Codable {
         selectedLocalTranscriptionModelName: String = LocalTranscriptionService.recommendedFastModelName,
         hasAutoSelectedFastLocalModel: Bool = false,
         ollamaModelName: String = "qwen2.5:7b",
-        historyLimit: Int = 5
+        historyLimit: Int = 5,
+        hotkeyBindings: HotkeyBindingSet = .default
     ) {
         self.hotkeyMode = hotkeyMode
         self.hasSeenOnboarding = hasSeenOnboarding
@@ -147,6 +86,7 @@ struct AppSettings: Codable {
         self.hasAutoSelectedFastLocalModel = hasAutoSelectedFastLocalModel
         self.ollamaModelName = ollamaModelName
         self.historyLimit = historyLimit
+        self.hotkeyBindings = hotkeyBindings
     }
 
     enum CodingKeys: String, CodingKey {
@@ -157,6 +97,7 @@ struct AppSettings: Codable {
         case hasAutoSelectedFastLocalModel
         case ollamaModelName
         case historyLimit
+        case hotkeyBindings
     }
 
     init(from decoder: Decoder) throws {
@@ -175,6 +116,11 @@ struct AppSettings: Codable {
         ollamaModelName = try container.decodeIfPresent(String.self, forKey: .ollamaModelName) ?? "qwen2.5:7b"
         let decodedLimit = try container.decodeIfPresent(Int.self, forKey: .historyLimit) ?? 5
         historyLimit = min(max(decodedLimit, 0), Self.maxHistoryLimit)
+        // Ältere settings.json kennt das Feld nicht -> bisherige fn-Kürzel.
+        // `repaired()` wirft ungültige oder doppelte Belegungen aus einer von
+        // Hand bearbeiteten Datei raus, statt sie stumm wirken zu lassen.
+        hotkeyBindings = (try container.decodeIfPresent(HotkeyBindingSet.self, forKey: .hotkeyBindings))?
+            .repaired() ?? .default
     }
 }
 

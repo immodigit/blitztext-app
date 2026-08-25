@@ -88,6 +88,9 @@ final class AppState {
             if appSettings.historyLimit != oldValue.historyLimit {
                 trimHistoryToLimit()
             }
+            if appSettings.hotkeyBindings != oldValue.hotkeyBindings {
+                hotkeyService.bindings = appSettings.hotkeyBindings
+            }
         }
     }
 
@@ -134,10 +137,40 @@ final class AppState {
         self.dampfAblassenSettings = Self.loadDampfAblassenSettings()
         self.emojiTextSettings = Self.loadEmojiTextSettings()
         self.transcriptHistory = Self.loadHistory()
+        hotkeyService.bindings = appSettings.hotkeyBindings
         refreshAccessibilityPermission()
         autoSelectFastLocalModelIfNeeded()
         prewarmLocalTranscriptionIfNeeded()
         refreshOllamaAvailability()
+    }
+
+    // MARK: - Tastenkürzel
+
+    /// Beschriftung des Kürzels — nil, wenn der Workflow bewusst unbelegt ist.
+    func hotkeyLabel(for type: WorkflowType) -> String? {
+        appSettings.hotkeyBindings[type]?.label
+    }
+
+    /// Belegt einen Workflow neu. Gibt die Workflows zurück, die diese
+    /// Kombination schon benutzen — dann wird nichts geändert, statt einem
+    /// anderen Workflow stillschweigend sein Kürzel wegzunehmen.
+    @discardableResult
+    func assignHotkey(_ binding: HotkeyBinding, to type: WorkflowType) -> [WorkflowType] {
+        // Ungültige Kombinationen kommen gar nicht erst bis hierher — der
+        // Recorder in BlitztextCore lehnt sie schon beim Aufnehmen ab.
+        guard binding.isValid else { return [] }
+        let conflicts = appSettings.hotkeyBindings.conflicts(with: binding, ignoring: type)
+        guard conflicts.isEmpty else { return conflicts }
+        appSettings.hotkeyBindings = appSettings.hotkeyBindings.setting(binding, for: type)
+        return []
+    }
+
+    func clearHotkey(for type: WorkflowType) {
+        appSettings.hotkeyBindings = appSettings.hotkeyBindings.clearing(type)
+    }
+
+    func applyHotkeyPreset(_ preset: HotkeyPreset) {
+        appSettings.hotkeyBindings = .preset(preset)
     }
 
     // MARK: - Custom Display Names
