@@ -36,6 +36,29 @@ Das lädt das Developer-ID-signierte, von Apple notarisierte DMG und legt Blitzt
 
 Fertig. Kürzel halten, sprechen, loslassen — der Text landet im aktiven Textfeld.
 
+### Tastenkürzel — auch mit externer Tastatur
+
+Standard (Apple-Tastatur, eingebaut oder Magic Keyboard):
+
+| Kürzel | Aktion |
+| --- | --- |
+| `fn + Shift` | Blitztext |
+| `fn + Shift + Ctrl` | Blitztext Lokal |
+| `fn + Ctrl` | Blitztext+ |
+| `fn + Option` | Blitztext $%&! |
+| `fn + Cmd` | Blitztext :) |
+
+**Externe Tastatur ohne nutzbares `fn`?** Viele Fremdhersteller-Tastaturen haben keine `fn`-Taste, oder ihre `fn` wird in der Tastatur-Firmware verarbeitet und erreicht macOS nie. Dann reagiert kein einziges Kürzel. Abhilfe in den Blitztext-Einstellungen → **Tastenkürzel**:
+
+- **„Externe Tastatur"** wählen — setzt alle fünf Kürzel auf fn-freie Kombinationen (`Ctrl + Option`, `Ctrl + Shift`, `Option + Shift`, `Ctrl + Cmd`, `Option + Cmd`).
+- Oder jedes Kürzel einzeln über **„Ändern"** neu belegen: gewünschte Tasten halten, loslassen, fertig. Mindestens zwei Tasten aus `fn`, `Ctrl`, `Option`, `Shift`, `Cmd`.
+- Einzelne Aktionen lassen sich auch ganz ohne Kürzel lassen (×) — sie bleiben über das Menü erreichbar.
+
+Zwei Dinge, die man wissen sollte:
+
+- **Nur Modifier-Tasten, keine Buchstaben.** Blitztext hört global mit und kann Tastendrücke nicht abfangen — ein Buchstabe im Kürzel würde beim Aufnehmen mit in den Text tippen. Modifier allein lösen in keiner App etwas aus.
+- **Teilen sich zwei Kürzel Tasten** (z. B. `fn + Shift` und `fn + Shift + Ctrl`), löst das kürzere zuerst aus, weil macOS jede Taste einzeln meldet. Das längere erreichst du, indem du die gemeinsamen Tasten zuerst hältst und die zusätzliche zuletzt drückst. Die Einstellungen markieren solche Kürzel mit ⚠️. Das „Externe Tastatur"-Preset ist bewusst frei davon.
+
 ### Weg 3: Aus dem Quellcode bauen (für Entwickler und Neugierige)
 
 ```bash

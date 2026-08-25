@@ -1,4 +1,5 @@
 import SwiftUI
+import BlitztextCore
 
 // MARK: - Workflow Accent Color (eine Quelle für Zeilen, Popover und HUD)
 
@@ -24,6 +25,9 @@ struct WorkflowRowView: View {
     /// deaktiviert ist). Im Normalfall bleibt die Zeile bewusst ruhig.
     var subtitle: String? = nil
     var dataMode: DataMode? = nil
+    /// Beschriftung des Kürzels. Nil, wenn der Workflow unbelegt ist —
+    /// dann bleibt der Badge weg statt eine tote Taste zu versprechen.
+    var hotkeyLabel: String? = nil
     let action: () -> Void
 
     @State private var isHovered = false
@@ -63,8 +67,10 @@ struct WorkflowRowView: View {
                     DataModeBadge(mode: dataMode, enabled: enabled)
                 }
 
-                HotkeyBadge(label: type.hotkeyLabel, enabled: enabled)
-                    .opacity(enabled ? 1 : 0.4)
+                if let hotkeyLabel {
+                    HotkeyBadge(label: hotkeyLabel, enabled: enabled)
+                        .opacity(enabled ? 1 : 0.4)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

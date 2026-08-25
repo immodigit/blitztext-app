@@ -1,4 +1,5 @@
 import SwiftUI
+import BlitztextCore
 
 @main
 struct BlitztextMacApp: App {

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import OSLog
+import BlitztextCore
 
 private let hudLogger = Logger(subsystem: "app.blitztext.mac", category: "StatusHUD")
 
