@@ -4,10 +4,17 @@ name: release-please
 # (fix→Patch, feat→Minor) die nächste Version ab, aktualisiert
 # MARKETING_VERSION in BlitztextMac/project.yml und schreibt den CHANGELOG.
 #
-# Beim Mergen des Release-PRs erzeugt release-please den Tag vX.Y.Z. Weil das
-# über RELEASE_PLEASE_TOKEN (PAT) läuft, löst dieser Tag-Push den Workflow
-# release.yml aus (bauen → notarisieren → veröffentlichen → Cask). Mit dem
-# Standard-GITHUB_TOKEN würde der Tag KEINEN Folge-Workflow starten.
+# Beim Mergen des Release-PRs erzeugt release-please Tag und GitHub-Release.
+# Dieser Tag-Push startet KEINEN Folge-Workflow, weil er vom GITHUB_TOKEN
+# kommt — deshalb wird release.yml hier ausdrücklich per workflow_dispatch
+# angestoßen. workflow_dispatch ist die dokumentierte Ausnahme von der Regel
+# "Events vom GITHUB_TOKEN lösen keine Workflows aus". Damit braucht dieser
+# Ablauf keinen langlebigen PAT im Repository.
+#
+# release.yml hängt das notarisierte DMG anschließend an das bereits von
+# release-please angelegte Release. Nur der Cask-Update im Tap-Repo braucht
+# weiterhin ein eigenes Token (TAP_GITHUB_TOKEN) — ein Push in ein fremdes
+# Repository geht mit dem GITHUB_TOKEN nicht.
 
 on:
   push:
@@ -22,22 +29,19 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      # Ohne PAT kann release-please nichts tun. Statt bei jedem Push rot zu
-      # werden, überspringt der Job dann sauber (grün).
-      - name: Token vorhanden?
-        id: guard
-        env:
-          TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "RELEASE_PLEASE_TOKEN fehlt – release-please übersprungen."
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          fi
       - uses: googleapis/release-please-action@v4
-        if: steps.guard.outputs.enabled == 'true'
+        id: release
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Nur wenn gerade wirklich released wurde (Release-PR gemergt), nicht
+      # bei jedem normalen Push auf main.
+      - name: Release-Build anstoßen
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Release ${{ steps.release.outputs.tag_name }} angelegt – starte release.yml."
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main
