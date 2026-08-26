@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/immodigit/blitztext-app/compare/v1.7.0...v1.7.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **ci:** Release-Dispatch scheiterte an fehlendem actions:write ([71af42f](https://github.com/immodigit/blitztext-app/commit/71af42f225f83f3cdcb0102a1bdff56f74cf0430))
+
 ## [1.7.0](https://github.com/immodigit/blitztext-app/compare/v1.6.0...v1.7.0) (2026-08-25)
 
 
