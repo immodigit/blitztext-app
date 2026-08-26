@@ -11,7 +11,7 @@ settings:
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     ONLY_ACTIVE_ARCH: NO
-    MARKETING_VERSION: "1.7.0" # x-release-please-version
+    MARKETING_VERSION: "1.7.1" # x-release-please-version
     CURRENT_PROJECT_VERSION: "15"
 
 packages:
