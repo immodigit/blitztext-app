@@ -15,6 +15,9 @@ Drei Wege — vom Einfachsten zum Entwickler-Weg. Für Weg 1 und 2 brauchst du k
 ### Weg 1: Mit Homebrew (empfohlen)
 
 ```bash
+# brew installieren 
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+# blitztext via brew installieren 
 brew install --cask immodigit/blitztext/blitztext
 ```
 
