@@ -60,6 +60,27 @@ final class AppState {
     private var fileTranscriptionWrittenOutputs: [URL] = []
     private var isProcessingFileTranscriptionQueue = false
     private var currentFileTranscriptionLabel = ""
+    /// Sprecher der zuletzt transkribierten Aufnahme (nil = nur eine Person
+    /// oder Sprechererkennung aus).
+    var speakerReview: SpeakerReview? {
+        didSet {
+            if let old = oldValue?.clipsDirectory, old != speakerReview?.clipsDirectory {
+                VoiceSamplePlayer.shared.stop()
+                try? FileManager.default.removeItem(at: old)
+            }
+        }
+    }
+    /// Hinweis, falls die Sprechererkennung nicht lief (Transkript gibt es trotzdem).
+    var speakerRecognitionNotice: String?
+    /// Die letzte Transkription lief ohne Sprecher, weil das Modell fehlt —
+    /// dann bietet die Ergebnisansicht den Download an.
+    var speakerModelMissingForLastTranscription = false
+    var speakerModelInstalled = SpeakerRecognitionService.isModelInstalled
+    var speakerModelDownloadProgress: Double?
+    var speakerModelDownloadErrorText: String?
+    var conversationNote: ConversationNotePhase = .idle
+    private var conversationNoteTask: Task<Void, Never>?
+    let voiceProfiles = VoiceProfileStore.shared
     // Umformer-Textbox (Blitztext+, $%&!, :))
     var improverInputText = ""
     var improverType: WorkflowType = .textImprover
@@ -432,9 +453,11 @@ final class AppState {
                         failures.append("\(job.url.lastPathComponent): keine Sprache erkannt")
                         continue
                     }
+                    var review = result.review
                     if job.writeTextFile {
                         if let txt = writeOutputFile(result.text, forSource: job.url, ext: "txt") {
                             fileTranscriptionWrittenOutputs.append(txt)
+                            review?.textFileURL = txt
                         }
                         // Untertitel mit Timestamps, sofern Segmente vorliegen (lokaler Modus).
                         if !result.cues.isEmpty,
@@ -443,6 +466,12 @@ final class AppState {
                         }
                     }
                     succeeded += 1
+                    conversationNoteTask?.cancel()
+                    conversationNote = .idle
+                    speakerReview = review
+                    speakerRecognitionNotice = result.speakerNotice
+                    speakerModelMissingForLastTranscription = result.speakerModelMissing
+                    if review != nil { refreshOllamaAvailability() }
                     fileTranscriptionState = .done(
                         text: result.text,
                         fileName: job.url.lastPathComponent,
@@ -463,6 +492,8 @@ final class AppState {
 
             // Fehler im Stapel sichtbar machen (statt sie hinter der letzten Datei zu verstecken).
             if let summary = TranscriptionBatchSummary.text(succeeded: succeeded, failures: failures) {
+                // Die Bilanz ersetzt das letzte Transkript — Sprecherzuordnung passt dann nicht mehr dazu.
+                speakerReview = nil
                 fileTranscriptionState = succeeded == 0
                     ? .failed(summary)
                     : .done(text: summary, fileName: "Stapel-Bilanz", savedToFile: true)
@@ -477,6 +508,8 @@ final class AppState {
               let output = writeOutputFile(text, forSource: source, ext: "txt") else {
             return
         }
+        // Spätere Benennungen sollen genau diese Datei aktualisieren.
+        speakerReview?.textFileURL = output
         NSWorkspace.shared.activateFileViewerSelecting([output])
     }
 
@@ -487,7 +520,154 @@ final class AppState {
         fileTranscriptionWrittenOutputs.removeAll()
         isProcessingFileTranscriptionQueue = false
         fileTranscriptionState = .idle
+        conversationNoteTask?.cancel()
+        conversationNote = .idle
+        speakerReview = nil
+        speakerRecognitionNotice = nil
+        speakerModelMissingForLastTranscription = false
         page = .main
+    }
+
+    /// Transkribiert die zuletzt gewählte Datei erneut (z. B. nach dem Laden
+    /// der Sprechererkennung).
+    func retranscribeLastFile() {
+        guard let url = lastTranscriptionSourceURL else { return }
+        let hadTextFile: Bool
+        if case let .done(_, _, savedToFile) = fileTranscriptionState {
+            hadTextFile = savedToFile
+        } else {
+            hadTextFile = false
+        }
+        speakerModelMissingForLastTranscription = false
+        startFileTranscription(url: url, writeTextFileOnFinish: hadTextFile)
+    }
+
+    /// Lädt das Modell der Sprechererkennung (~11 MB). Nur auf Klick bzw. als
+    /// Teil des ausdrücklich gestarteten Modell-Downloads im lokalen Modus.
+    func installSpeakerRecognitionModel() {
+        guard speakerModelDownloadProgress == nil else { return }
+        Task { await downloadSpeakerRecognitionModel() }
+    }
+
+    private func downloadSpeakerRecognitionModel() async {
+        guard !SpeakerRecognitionService.isModelInstalled else {
+            speakerModelInstalled = true
+            return
+        }
+        speakerModelDownloadProgress = 0
+        speakerModelDownloadErrorText = nil
+        do {
+            try await SpeakerRecognitionService.shared.downloadModels { progress in
+                Task { @MainActor [weak self] in
+                    guard let self, self.speakerModelDownloadProgress != nil else { return }
+                    self.speakerModelDownloadProgress = min(max(progress, 0), 1)
+                }
+            }
+            speakerModelInstalled = true
+        } catch {
+            speakerModelDownloadErrorText = error.localizedDescription
+        }
+        speakerModelInstalled = SpeakerRecognitionService.isModelInstalled
+        speakerModelDownloadProgress = nil
+    }
+
+    // MARK: - Sprechererkennung (wer hat was gesagt)
+
+    /// Ordnet eine Stimme einem bestehenden Profil zu und lernt sie dort ein.
+    func assignSpeaker(_ speakerID: Int, to profileID: UUID) {
+        guard let speaker = speakerReview?.speaker(speakerID) else { return }
+        if let vector = speaker.vector {
+            voiceProfiles.learn(profileID, vector: vector, sampleClip: speaker.samples.first?.clipURL)
+        }
+        speakerReview?.update(speakerID, to: .confirmed(profileID: profileID))
+        applySpeakerReviewChange()
+    }
+
+    /// Benennt eine Stimme. Gibt es den Namen schon, wird die Stimme dort
+    /// eingelernt; sonst entsteht ein neues Profil. Ohne Fingerabdruck (zu wenig
+    /// Sprache) gilt der Name nur für dieses Transkript.
+    func nameSpeaker(_ speakerID: Int, as rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let speaker = speakerReview?.speaker(speakerID) else { return }
+
+        if let existing = voiceProfiles.profile(named: name) {
+            assignSpeaker(speakerID, to: existing.id)
+            return
+        }
+        guard let vector = speaker.vector else {
+            speakerReview?.update(speakerID, to: .named(name))
+            applySpeakerReviewChange()
+            return
+        }
+        let profile = voiceProfiles.create(name: name, vector: vector, sampleClip: speaker.samples.first?.clipURL)
+        speakerReview?.update(speakerID, to: .confirmed(profileID: profile.id))
+        applySpeakerReviewChange()
+    }
+
+    /// Lässt die Stimme als „Sprecher X“ stehen, ohne Profil.
+    func skipSpeaker(_ speakerID: Int) {
+        speakerReview?.update(speakerID, to: .skipped)
+        applySpeakerReviewChange()
+    }
+
+    /// Öffnet eine (automatisch oder vom Nutzer) zugeordnete Stimme erneut.
+    func reconsiderSpeaker(_ speakerID: Int) {
+        speakerReview?.update(speakerID, to: .unknown)
+        applySpeakerReviewChange()
+    }
+
+    /// Schreibt Anzeige und ggf. die .txt mit den aktuellen Namen neu.
+    private func applySpeakerReviewChange() {
+        guard let review = speakerReview,
+              case let .done(_, fileName, savedToFile) = fileTranscriptionState else { return }
+        let text = review.transcript(profileName: { [voiceProfiles] in voiceProfiles.profile($0)?.name })
+        fileTranscriptionState = .done(text: text, fileName: fileName, savedToFile: savedToFile)
+        if let url = review.textFileURL {
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        // Eine schon erstellte Notiz kennt die neuen Namen nicht.
+        if case .done = conversationNote { conversationNote = .idle }
+    }
+
+    /// Fasst das Gespräch je Person zusammen. Im lokalen Modus nur mit lokalem
+    /// Modell — kein stiller Wechsel in die Cloud.
+    func createConversationNote() {
+        guard case let .done(transcript, _, _) = fileTranscriptionState else { return }
+
+        let engine: LLMService.LocalRewriteEngine
+        if appSettings.secureLocalModeEnabled {
+            // Apples Modell hat ein kleines Kontextfenster; lange Gespräche an Ollama.
+            if transcript.count > LLMService.appleConversationNoteLimit, ollamaAvailable {
+                engine = .ollama(model: appSettings.ollamaModelName)
+            } else {
+                engine = currentLocalRewriteEngine()
+            }
+            guard engine != .none else {
+                conversationNote = .failed("Für die Gesprächsnotiz im lokalen Modus braucht es Apple Intelligence oder Ollama.")
+                return
+            }
+        } else {
+            guard KeychainService.isConfigured else {
+                conversationNote = .failed("Für die Gesprächsnotiz fehlt der OpenAI API Key (Einstellungen → Zugang).")
+                return
+            }
+            engine = .none
+        }
+
+        conversationNoteTask?.cancel()
+        conversationNote = .running
+        conversationNoteTask = Task {
+            do {
+                let note = try await LLMService.conversationNote(transcript: transcript, localEngine: engine)
+                guard !Task.isCancelled else { return }
+                conversationNote = .done(note)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                conversationNote = .failed(error.localizedDescription)
+            }
+        }
     }
 
     // MARK: - Blitztext+ Textbox (tippen oder diktieren → umformen)
@@ -678,7 +858,13 @@ final class AppState {
     private func transcribeAudioFile(
         at url: URL,
         reportProgress: Bool = false
-    ) async throws -> (text: String, cues: [SubtitleCue]) {
+    ) async throws -> (
+        text: String,
+        cues: [SubtitleCue],
+        review: SpeakerReview?,
+        speakerNotice: String?,
+        speakerModelMissing: Bool
+    ) {
         let audioURL: URL
         if VideoAudioExtractor.isVideo(url) {
             fileTranscriptionState = .running(
@@ -697,6 +883,9 @@ final class AppState {
 
         let text: String
         var cues: [SubtitleCue] = []
+        var review: SpeakerReview?
+        var speakerNotice: String?
+        var speakerModelMissing = false
         if appSettings.secureLocalModeEnabled {
             // Fortschritt nebenläufig pollen (nur lokal — Online liefert keinen).
             let progressPoll: Task<Void, Never>? = reportProgress ? Task { @MainActor in
@@ -708,24 +897,62 @@ final class AppState {
             } : nil
             defer { progressPoll?.cancel() }
 
-            let result = try await LocalTranscriptionService.shared.transcribeWithSegments(
-                audioURL: audioURL,
-                language: transcriptionSettings.language,
-                modelName: selectedLocalModelName
-            )
-            text = result.text
-            cues = result.segments
+            let segments: [(start: Double, end: Double, text: String)]
+            speakerModelMissing = appSettings.speakerRecognitionEnabled && !SpeakerRecognitionService.isModelInstalled
+            if appSettings.speakerRecognitionEnabled && !speakerModelMissing {
+                let clipsDirectory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("blitztext-voices", isDirectory: true)
+                    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                let label = currentFileTranscriptionLabel
+                let conversation = try await LocalTranscriptionService.shared.transcribeConversation(
+                    audioURL: audioURL,
+                    language: transcriptionSettings.language,
+                    modelName: selectedLocalModelName,
+                    clipsDirectory: clipsDirectory,
+                    onSpeakerPhase: { @MainActor in
+                        progressPoll?.cancel()
+                        self.fileTranscriptionState = .running(
+                            fileName: "\(label) – Sprecher werden erkannt …",
+                            progress: nil
+                        )
+                    }
+                )
+                segments = conversation.segments
+                speakerNotice = conversation.speakerError.map { "Sprecher nicht erkannt: \($0)" }
+                if let analysis = conversation.analysis, !analysis.speakers.isEmpty {
+                    let built = SpeakerReview(
+                        analysis: analysis,
+                        profiles: voiceProfiles.matchingCandidates,
+                        sourceFileName: url.lastPathComponent,
+                        clipsDirectory: clipsDirectory
+                    )
+                    review = built
+                    text = built.transcript(profileName: { [voiceProfiles] in voiceProfiles.profile($0)?.name })
+                } else {
+                    try? FileManager.default.removeItem(at: clipsDirectory)
+                    text = TranscriptionQualityService.cleanedTranscript(conversation.text)
+                }
+            } else {
+                let result = try await LocalTranscriptionService.shared.transcribeWithSegments(
+                    audioURL: audioURL,
+                    language: transcriptionSettings.language,
+                    modelName: selectedLocalModelName
+                )
+                text = TranscriptionQualityService.cleanedTranscript(result.text)
+                segments = result.segments
+            }
+            cues = segments
                 .map { (start: $0.start, end: $0.end, text: SubtitleFormatter.strippingTokens($0.text)) }
                 .filter { !$0.text.isEmpty && $0.end > $0.start }
                 .map { SubtitleCue(start: $0.start, end: $0.end, text: $0.text) }
         } else {
-            text = try await TranscriptionService.transcribe(
+            text = TranscriptionQualityService.cleanedTranscript(try await TranscriptionService.transcribe(
                 audioURL: audioURL,
                 customTerms: textImprovementSettings.customTerms,
                 language: transcriptionSettings.language
-            )
+            ))
         }
-        return (TranscriptionQualityService.cleanedTranscript(text), cues)
+        return (text, cues, review, speakerNotice, speakerModelMissing)
     }
 
     /// Aktualisiert die Fortschrittsanzeige während der laufenden Datei-Transkription.
@@ -821,6 +1048,12 @@ final class AppState {
                 localModelDownloadProgress = nil
                 localModelDownloadStatusText = "\(LocalTranscriptionModel.displayName(for: modelName)) ist installiert."
                 localModelDownloadErrorText = nil
+
+                // Die kleine Sprechererkennung gleich mitnehmen: Der Nutzer hat
+                // den Download hier bewusst gestartet; später lädt nichts still nach.
+                if appSettings.speakerRecognitionEnabled {
+                    await downloadSpeakerRecognitionModel()
+                }
 
                 // Nach dem Download nur prewarmen, wenn der RAM reicht — sonst
                 // würde genau hier der Absturz passieren.

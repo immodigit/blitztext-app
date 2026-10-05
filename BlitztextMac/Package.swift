@@ -23,7 +23,8 @@ let package = Package(
             name: "Blitztext",
             dependencies: [
                 "BlitztextCore",
-                .product(name: "WhisperKit", package: "argmax-oss-swift")
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
+                .product(name: "SpeakerKit", package: "argmax-oss-swift")
             ],
             path: ".",
             exclude: ["Resources", "project.yml", "Tests", "Core", "Package.resolved"],

@@ -35,7 +35,7 @@ Das lädt das Developer-ID-signierte, von Apple notarisierte DMG und legt Blitzt
 2. **Bedienungshilfen erlauben** (Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen → Blitztext aktivieren), damit der Text direkt in deine App eingefügt wird.
 3. Dann hast du zwei Möglichkeiten:
    - **Online-Modus:** In den Blitztext-Einstellungen deinen **OpenAI API Key** eintragen ([hier erstellen](https://platform.openai.com/api-keys)).
-   - **Komplett lokal — ohne OpenAI-Konto:** Im Blitztext-Menü den Schalter **„Sicherer Lokaler Modus"** aktivieren. Blitztext lädt das Sprachmodell direkt in der App herunter (einige hundert MB, einmalig). Die Transkription läuft danach vollständig auf deinem Mac — kein Netzwerk, kein Konto. Nur die Umform-Workflows (Blitztext+, $%&!, :)) brauchen weiterhin OpenAI oder lokal [Ollama](https://ollama.com).
+   - **Komplett lokal — ohne OpenAI-Konto:** Im Blitztext-Menü den Schalter **„Sicherer Lokaler Modus"** aktivieren. Blitztext lädt das Sprachmodell direkt in der App herunter (einige hundert MB, einmalig). Die Transkription läuft danach vollständig auf deinem Mac — kein Netzwerk, kein Konto. Die Sprechererkennung (wer hat was gesagt, ca. 11 MB) lädt Blitztext dabei gleich mit; sie lässt sich unter Einstellungen → Stimmen abschalten. Nur die Umform-Workflows (Blitztext+, $%&!, :)) brauchen weiterhin OpenAI oder lokal [Ollama](https://ollama.com).
 
 Fertig. Kürzel halten, sprechen, loslassen — der Text landet im aktiven Textfeld.
 
@@ -87,6 +87,7 @@ tccutil reset Accessibility app.blitztext.mac
 - **Blitztext+**: record speech, transcribe it, then turn the rough draft into cleaner writing.
 - **Blitztext $%&!**: turn frustrated speech into a calmer message.
 - **Blitztext :)**: add fitting emojis to dictated text.
+- **Who said what** (local mode, voice-message files): detects the speakers in a recording and labels the transcript per person. New voices are shown with short audio samples so you can name them; named voices are recognized automatically in later recordings. Optional conversation note summarizes what each person said. The speaker model (~11 MB) is downloaded only on request, together with the local Whisper model or via Settings → Stimmen. Voice profiles (a voiceprint plus one short sample) stay on the Mac under `~/Library/Application Support/Blitztext/voices`. Voiceprints of other people are biometric data — only store them with their consent.
 
 ## Important Preview Notes
 

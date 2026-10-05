@@ -440,6 +440,188 @@ do {
     equal(recorder.state, .idle, "reset räumt auf")
 }
 
+// MARK: - Sprechererkennung: Sprecherwechsel
+
+do {
+    let pieces = [
+        AttributedPiece(speaker: 0, start: 0, end: 2, text: "Hallo"),
+        AttributedPiece(speaker: 0, start: 2, end: 4, text: "Daniel."),
+        AttributedPiece(speaker: 1, start: 4, end: 6, text: "Hi Chris."),
+        AttributedPiece(speaker: 0, start: 6, end: 8, text: "Pass auf."),
+    ]
+    let turns = SpeakerTurns.merge(pieces)
+    equal(turns.count, 3, "aufeinanderfolgende Stücke derselben Person werden ein Redebeitrag")
+    equal(turns.first, SpeakerTurn(speaker: 0, start: 0, end: 4, text: "Hallo Daniel."), "Text und Zeit werden verbunden")
+    equal(turns.last?.speaker, 0, "Sprecherwechsel zurück erzeugt einen neuen Beitrag")
+}
+
+do {
+    let pieces = [
+        AttributedPiece(speaker: nil, start: 0, end: 1, text: "Äh"),
+        AttributedPiece(speaker: 1, start: 1, end: 3, text: "Also gut."),
+        AttributedPiece(speaker: nil, start: 3, end: 4, text: "ja"),
+        AttributedPiece(speaker: 0, start: 4, end: 5, text: "Okay."),
+    ]
+    let turns = SpeakerTurns.merge(pieces)
+    equal(turns.map(\.speaker), [1, 0], "Stücke ohne Sprecher hängen am Nachbarbeitrag statt eigene Zeilen zu erzeugen")
+    equal(turns.first?.text, "Äh Also gut. ja", "unzugeordneter Text geht nicht verloren")
+}
+
+equal(SpeakerTurns.merge([AttributedPiece(speaker: 0, start: 0, end: 1, text: "   ")]), [],
+      "leere Stücke erzeugen keinen Beitrag")
+
+// MARK: - Sprechererkennung: Platzhalter und Format
+
+equal(SpeakerLabels.placeholder(forIndex: 0), "Sprecher A", "erster Platzhalter")
+equal(SpeakerLabels.placeholder(forIndex: 2), "Sprecher C", "dritter Platzhalter")
+equal(SpeakerLabels.placeholder(forIndex: 26), "Sprecher 27", "nach Z wird gezählt")
+
+do {
+    let turns = [
+        SpeakerTurn(speaker: 3, start: 0, end: 1, text: "a"),
+        SpeakerTurn(speaker: 1, start: 1, end: 2, text: "b"),
+        SpeakerTurn(speaker: 3, start: 2, end: 3, text: "c"),
+    ]
+    equal(SpeakerLabels.placeholders(for: turns), [3: "Sprecher A", 1: "Sprecher B"],
+          "Platzhalter folgen der Reihenfolge des ersten Wortbeitrags, nicht der internen Nummer")
+}
+
+equal(SpeakerTranscriptFormatter.timecode(75), "01:15", "Zeitmarke unter einer Stunde")
+equal(SpeakerTranscriptFormatter.timecode(3725), "1:02:05", "Zeitmarke ab einer Stunde")
+
+do {
+    let turns = [
+        SpeakerTurn(speaker: 0, start: 0, end: 4, text: "Hallo Daniel."),
+        SpeakerTurn(speaker: 1, start: 64, end: 66, text: "Hi Chris."),
+    ]
+    equal(SpeakerTranscriptFormatter.text(turns: turns, names: [0: "Chris", 1: "Sprecher B"]),
+          "[00:00] Chris: Hallo Daniel.\n\n[01:04] Sprecher B: Hi Chris.",
+          "Transkript zeigt Zeitmarke, Namen und Text je Beitrag")
+}
+
+// MARK: - Sprechererkennung: Zeitachse
+
+do {
+    let spans = [
+        SpeakerSpan(speaker: 0, start: 0, end: 10),
+        SpeakerSpan(speaker: 1, start: 8, end: 14),
+        SpeakerSpan(speaker: 0, start: 20, end: 21),
+    ]
+    let exclusive = SpeakerTimeline.exclusiveSpans(spans, minimumDuration: 1.5)
+    equal(exclusive[0], [TimeSpan(start: 0, end: 8)], "Überlappung wird abgeschnitten, zu kurze Stücke fallen weg")
+    equal(exclusive[1], [TimeSpan(start: 10, end: 14)], "auch der zweite Sprecher verliert den Überlappungsteil")
+    equal(SpeakerTimeline.talkTime(spans), [0: 11, 1: 6], "Redezeit zählt alle eigenen Abschnitte")
+}
+
+do {
+    let spans = [SpeakerSpan(speaker: 0, start: 0, end: 5), SpeakerSpan(speaker: 0, start: 3, end: 8)]
+    equal(SpeakerTimeline.talkTime(spans), [0: 8], "überlappende Abschnitte derselben Person zählen nicht doppelt")
+    equal(SpeakerTimeline.exclusiveSpans(spans, minimumDuration: 1)[0], [TimeSpan(start: 0, end: 8)],
+          "eigene Überlappung ist keine Fremdüberlappung")
+}
+
+// MARK: - Sprechererkennung: Hörproben
+
+do {
+    let spans = [
+        TimeSpan(start: 0, end: 3), TimeSpan(start: 10, end: 30), TimeSpan(start: 40, end: 41),
+        TimeSpan(start: 300, end: 306), TimeSpan(start: 600, end: 604),
+    ]
+    let picks = VoiceSamplePicker.pick(from: spans, count: 3, minDuration: 2.5, maxDuration: 8)
+    equal(picks.count, 3, "liefert die gewünschte Anzahl Hörproben")
+    check(picks.allSatisfy { $0.duration <= 8 && $0.duration >= 2.5 }, "Hörproben sind zwischen Mindest- und Höchstlänge")
+    check(picks.contains { $0.start >= 600 } && picks.contains { $0.start < 60 },
+          "Hörproben stammen aus Anfang und Ende der Aufnahme, nicht nur vom längsten Block")
+    check(picks == picks.sorted { $0.start < $1.start }, "Hörproben sind chronologisch sortiert")
+    equal(picks.first { $0.start >= 10 && $0.start < 30 }?.duration, 8, "lange Abschnitte werden auf die Höchstlänge gekürzt")
+}
+
+equal(VoiceSamplePicker.pick(from: [TimeSpan(start: 0, end: 1)], count: 3, minDuration: 2.5, maxDuration: 8), [],
+      "zu kurze Abschnitte liefern keine Hörprobe")
+
+// MARK: - Sprechererkennung: Stimmabgleich
+
+do {
+    let a: [Float] = [3, 4]
+    equal(VoiceVectorMath.normalized(a), [0.6, 0.8], "Vektor wird auf Länge 1 gebracht")
+    check(abs(VoiceVectorMath.cosine([1, 0], [0, 1])) < 0.0001, "senkrechte Stimmen sind unähnlich")
+    check(abs(VoiceVectorMath.cosine([2, 0], [5, 0]) - 1) < 0.0001, "Länge spielt für die Ähnlichkeit keine Rolle")
+    let merged = VoiceVectorMath.mergedCentroid(existing: [1, 0], weight: 3, adding: [0, 1])
+    check(merged[0] > merged[1] && abs(VoiceVectorMath.cosine(merged, [3, 1]) - 1) < 0.0001,
+          "neue Probe verschiebt das Profil gewichtet statt es zu ersetzen")
+}
+
+do {
+    let chris = UUID(), daniel = UUID()
+    let profiles = [VoiceProfileCandidate(id: chris, vector: [1, 0, 0]), VoiceProfileCandidate(id: daniel, vector: [0, 1, 0])]
+    let speakers: [Int: [Float]] = [
+        0: [0.95, 0.05, 0],      // eindeutig Chris
+        1: [0.1, 0.6, 0.79],     // halbwegs Daniel
+        2: [0, 0.1, 1],          // niemand
+    ]
+    let result = VoiceMatcher.match(speakers: speakers, profiles: profiles, thresholds: .standard)
+    if case .recognized(let id, _) = result[0] { equal(id, chris, "eindeutige Stimme wird erkannt") } else { check(false, "Sprecher 0 sollte erkannt sein") }
+    if case .uncertain(let id, _) = result[1] { equal(id, daniel, "mittlere Ähnlichkeit wird als Vermutung gemeldet") } else { check(false, "Sprecher 1 sollte unsicher sein") }
+    equal(result[2], .unknown, "fremde Stimme ist neu")
+}
+
+do {
+    let chris = UUID()
+    let profiles = [VoiceProfileCandidate(id: chris, vector: [1, 0])]
+    let speakers: [Int: [Float]] = [0: [0.99, 0.1], 1: [0.9, 0.3]]
+    let result = VoiceMatcher.match(speakers: speakers, profiles: profiles, thresholds: .standard)
+    if case .recognized(let id, _) = result[0] { equal(id, chris, "bester Treffer bekommt das Profil") } else { check(false, "Sprecher 0 sollte erkannt sein") }
+    equal(result[1], .unknown, "ein Profil wird nie zwei Sprechern derselben Aufnahme zugeordnet")
+}
+
+equal(VoiceMatcher.match(speakers: [0: [1, 0]], profiles: [], thresholds: .standard), [0: .unknown],
+      "ohne Profile ist jede Stimme neu")
+
+// MARK: - Sprechererkennung: Zitat zur Hörprobe
+
+do {
+    let pieces = [
+        AttributedPiece(speaker: 0, start: 0, end: 2, text: "Vorher"),
+        AttributedPiece(speaker: 1, start: 9.5, end: 11, text: "ich habe"),
+        AttributedPiece(speaker: 1, start: 11, end: 13, text: "über 1000 Wohnungen."),
+        AttributedPiece(speaker: 0, start: 17, end: 19, text: "Danach"),
+    ]
+    equal(TranscriptQuote.text(in: TimeSpan(start: 10, end: 16), from: pieces, maxLength: 200),
+          "ich habe über 1000 Wohnungen.", "Zitat enthält genau die Stücke, deren Mitte in der Hörprobe liegt")
+    equal(TranscriptQuote.text(in: TimeSpan(start: 10, end: 16), from: pieces, maxLength: 12),
+          "ich habe …", "lange Zitate werden an einer Wortgrenze gekürzt")
+    equal(TranscriptQuote.text(in: TimeSpan(start: 30, end: 40), from: pieces, maxLength: 200), "",
+          "ohne Text in der Hörprobe bleibt das Zitat leer")
+}
+
+// MARK: - Sprechererkennung: Zuordnung je Sprecher
+
+do {
+    let chris = UUID()
+    equal(SpeakerAssignment(match: .recognized(profileID: chris, similarity: 0.9)),
+          .recognized(profileID: chris, similarity: 0.9), "sicherer Treffer wird übernommen")
+    equal(SpeakerAssignment(match: .uncertain(profileID: chris, similarity: 0.6)),
+          .suggested(profileID: chris, similarity: 0.6), "unsicherer Treffer wird zur Vermutung")
+    equal(SpeakerAssignment(match: .unknown), .unknown, "fremde Stimme bleibt unbekannt")
+
+    check(SpeakerAssignment.unknown.needsDecision, "neue Stimme wartet auf eine Entscheidung")
+    check(SpeakerAssignment.suggested(profileID: chris, similarity: 0.6).needsDecision, "Vermutung wartet auf Bestätigung")
+    check(!SpeakerAssignment.recognized(profileID: chris, similarity: 0.9).needsDecision, "erkannte Stimme braucht nichts")
+    check(!SpeakerAssignment.skipped.needsDecision, "übersprungene Stimme fragt nicht erneut")
+
+    let lookup: (UUID) -> String? = { $0 == chris ? "Chris" : nil }
+    equal(SpeakerAssignment.recognized(profileID: chris, similarity: 0.9).displayName(placeholder: "Sprecher A", profileName: lookup),
+          "Chris", "erkannte Stimme trägt den Profilnamen")
+    equal(SpeakerAssignment.confirmed(profileID: chris).displayName(placeholder: "Sprecher A", profileName: lookup),
+          "Chris", "bestätigte Stimme trägt den Profilnamen")
+    equal(SpeakerAssignment.suggested(profileID: chris, similarity: 0.6).displayName(placeholder: "Sprecher B", profileName: lookup),
+          "Sprecher B", "eine bloße Vermutung landet nicht im Transkript")
+    equal(SpeakerAssignment.named("Gast").displayName(placeholder: "Sprecher C", profileName: lookup),
+          "Gast", "nur hier benannte Stimme trägt den Namen")
+    equal(SpeakerAssignment.confirmed(profileID: UUID()).displayName(placeholder: "Sprecher A", profileName: lookup),
+          "Sprecher A", "gelöschtes Profil fällt auf den Platzhalter zurück")
+}
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")

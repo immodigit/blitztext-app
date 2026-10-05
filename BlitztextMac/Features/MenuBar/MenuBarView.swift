@@ -1214,6 +1214,7 @@ struct FileTranscriptionContentView: View {
     @Bindable var appState: AppState
     @State private var copied = false
     @State private var savedTxt = false
+    @State private var showingNote = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1282,7 +1283,10 @@ struct FileTranscriptionContentView: View {
     }
 
     private func resultView(text: String, fileName: String, savedToFile: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let review = appState.speakerReview
+        let shownText = showingNote ? (noteText ?? "") : text
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 12))
@@ -1295,28 +1299,58 @@ struct FileTranscriptionContentView: View {
             }
             .padding(.top, 12)
 
-            ScrollView {
-                Text(text)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if appState.speakerModelMissingForLastTranscription {
+                SpeakerModelOfferView(appState: appState)
             }
-            .frame(maxHeight: 220)
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.primary.opacity(0.04))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-            )
+
+            if let notice = appState.speakerRecognitionNotice {
+                Text(notice)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let review {
+                ScrollView {
+                    SpeakerReviewSection(appState: appState, review: review)
+                }
+                .frame(maxHeight: review.pendingSpeakers.isEmpty ? 150 : 330)
+                .fixedSize(horizontal: false, vertical: true)
+
+                Picker("", selection: $showingNote) {
+                    Text("Transkript").tag(false)
+                    Text("Gesprächsnotiz").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            if showingNote {
+                noteView
+            } else {
+                ScrollView {
+                    Text(text)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: review == nil ? 220 : 180)
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.primary.opacity(0.04))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                )
+            }
 
             HStack(spacing: 8) {
                 Button {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
+                    NSPasteboard.general.setString(shownText, forType: .string)
                     withAnimation(.easeInOut(duration: 0.2)) { copied = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
                         withAnimation(.easeInOut(duration: 0.2)) { copied = false }
@@ -1331,8 +1365,11 @@ struct FileTranscriptionContentView: View {
                     .foregroundStyle(copied ? .green : .blue)
                 }
                 .buttonStyle(SubtleButtonStyle())
+                .disabled(shownText.isEmpty)
 
-                if savedToFile {
+                if showingNote {
+                    EmptyView()
+                } else if savedToFile {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10, weight: .bold))
@@ -1368,6 +1405,80 @@ struct FileTranscriptionContentView: View {
                 .foregroundStyle(.secondary)
                 .buttonStyle(SubtleButtonStyle())
             }
+        }
+        .onChange(of: appState.speakerReview == nil) { _, noReview in
+            if noReview { showingNote = false }
+        }
+    }
+
+    private var noteText: String? {
+        if case let .done(note) = appState.conversationNote { return note }
+        return nil
+    }
+
+    @ViewBuilder
+    private var noteView: some View {
+        switch appState.conversationNote {
+        case .idle:
+            VStack(spacing: 8) {
+                Text("Fasst zusammen, was jede Person gesagt hat, plus Vereinbarungen und nächste Schritte.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let review = appState.speakerReview, !review.pendingSpeakers.isEmpty {
+                    Text("Tipp: Erst die offenen Stimmen benennen — sonst steht „Sprecher B“ in der Notiz.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("Gesprächsnotiz erstellen") {
+                    appState.createConversationNote()
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.blue)
+                .buttonStyle(SubtleButtonStyle())
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+
+        case .running:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Notiz wird erstellt …")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+
+        case let .done(note):
+            ScrollView {
+                Text(note)
+                    .font(.system(size: 12))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 220)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+
+        case let .failed(message):
+            VStack(spacing: 8) {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Nochmal versuchen") {
+                    appState.createConversationNote()
+                }
+                .font(.system(size: 12, weight: .medium))
+                .buttonStyle(SubtleButtonStyle())
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
         }
     }
 }
