@@ -647,6 +647,9 @@ struct CustomizeSettingsView: View {
                 }
             }
 
+            // MARK: Stimmen
+            VoiceProfilesSettingsSection(appState: appState)
+
             // MARK: Verlauf
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel(text: "Verlauf")
@@ -895,5 +898,126 @@ struct FlowLayout: Layout {
         }
 
         return (positions, CGSize(width: maxX, height: y + rowHeight))
+    }
+}
+
+// MARK: - Stimmen (Sprechererkennung)
+
+private struct VoiceProfilesSettingsSection: View {
+    @Bindable var appState: AppState
+    @State private var editingID: UUID?
+    @State private var editedName = ""
+    @State private var confirmDeleteAll = false
+
+    private var store: VoiceProfileStore { appState.voiceProfiles }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLabel(text: "Stimmen")
+
+            Toggle(isOn: $appState.appSettings.speakerRecognitionEnabled) {
+                Text("In Sprachnachrichten erkennen, wer spricht")
+                    .font(.system(size: 11.5))
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+
+            Text(appState.appSettings.secureLocalModeEnabled
+                ? "Läuft komplett auf dem Mac. Neue Stimmen benennst du nach der Transkription — danach erkennt Blitztext sie automatisch wieder."
+                : "Funktioniert nur im Sicheren Lokalen Modus. Online wird ohne Sprecher transkribiert.")
+                .font(.system(size: 10))
+                .foregroundStyle(appState.appSettings.secureLocalModeEnabled ? Color.secondary : Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if appState.appSettings.speakerRecognitionEnabled && !appState.speakerModelInstalled {
+                SpeakerModelDownloadControl(appState: appState)
+            }
+
+            if store.profiles.isEmpty {
+                Text("Noch keine Stimmprofile.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(store.profiles.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { profile in
+                        row(for: profile)
+                    }
+                }
+
+                Text("Je Stimme liegen ein Stimm-Fingerabdruck und eine kurze Hörprobe lokal auf diesem Mac. Kein Upload. Stimmprofile anderer Personen sind biometrische Daten — speichere sie nur mit deren Einverständnis.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("Alle Stimmprofile löschen") {
+                    confirmDeleteAll = true
+                }
+                .controlSize(.small)
+                .font(.system(size: 11))
+                .confirmationDialog(
+                    "Alle \(store.profiles.count) Stimmprofile löschen?",
+                    isPresented: $confirmDeleteAll
+                ) {
+                    Button("Löschen", role: .destructive) { store.deleteAll() }
+                } message: {
+                    Text("Blitztext erkennt diese Stimmen danach nicht mehr automatisch.")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(for profile: VoiceProfile) -> some View {
+        HStack(spacing: 8) {
+            if let url = store.sampleURL(for: profile.id) {
+                SamplePlayButton(url: url)
+            } else {
+                Image(systemName: "person.wave.2")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+            }
+
+            if editingID == profile.id {
+                TextField("Name", text: $editedName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11.5))
+                    .onSubmit { commitRename(profile.id) }
+                Button("OK") { commitRename(profile.id) }
+                    .controlSize(.small)
+            } else {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(profile.name)
+                        .font(.system(size: 11.5, weight: .medium))
+                    Text(profile.sampleCount == 1 ? "aus 1 Aufnahme gelernt" : "aus \(profile.sampleCount) Aufnahmen gelernt")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Button {
+                    editedName = profile.name
+                    editingID = profile.id
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .help("Umbenennen")
+                Button {
+                    store.delete(profile.id)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Stimmprofil löschen")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.035)))
+    }
+
+    private func commitRename(_ id: UUID) {
+        store.rename(id, to: editedName)
+        editingID = nil
     }
 }
