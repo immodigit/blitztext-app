@@ -68,6 +68,8 @@ struct AppSettings: Codable {
     /// Welche Tastenkombination welchen Workflow startet. Frei belegbar, weil
     /// viele externe Tastaturen keine nutzbare fn-Taste haben.
     var hotkeyBindings: HotkeyBindingSet = .default
+    /// Erkennt in Sprachnachrichten-Dateien, wer was gesagt hat (nur lokaler Modus).
+    var speakerRecognitionEnabled: Bool = true
 
     init(
         hotkeyMode: HotkeyMode = .hold,
@@ -77,7 +79,8 @@ struct AppSettings: Codable {
         hasAutoSelectedFastLocalModel: Bool = false,
         ollamaModelName: String = "qwen2.5:7b",
         historyLimit: Int = 5,
-        hotkeyBindings: HotkeyBindingSet = .default
+        hotkeyBindings: HotkeyBindingSet = .default,
+        speakerRecognitionEnabled: Bool = true
     ) {
         self.hotkeyMode = hotkeyMode
         self.hasSeenOnboarding = hasSeenOnboarding
@@ -87,6 +90,7 @@ struct AppSettings: Codable {
         self.ollamaModelName = ollamaModelName
         self.historyLimit = historyLimit
         self.hotkeyBindings = hotkeyBindings
+        self.speakerRecognitionEnabled = speakerRecognitionEnabled
     }
 
     enum CodingKeys: String, CodingKey {
@@ -98,6 +102,7 @@ struct AppSettings: Codable {
         case ollamaModelName
         case historyLimit
         case hotkeyBindings
+        case speakerRecognitionEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -121,6 +126,7 @@ struct AppSettings: Codable {
         // Hand bearbeiteten Datei raus, statt sie stumm wirken zu lassen.
         hotkeyBindings = (try container.decodeIfPresent(HotkeyBindingSet.self, forKey: .hotkeyBindings))?
             .repaired() ?? .default
+        speakerRecognitionEnabled = try container.decodeIfPresent(Bool.self, forKey: .speakerRecognitionEnabled) ?? true
     }
 }
 

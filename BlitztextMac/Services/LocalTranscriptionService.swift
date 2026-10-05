@@ -343,6 +343,72 @@ actor LocalTranscriptionService {
         return (text, segments)
     }
 
+    /// Transkript einer Gesprächsaufnahme: Text und Segmente wie bei
+    /// `transcribeWithSegments`, dazu die lokale Sprecherzuordnung.
+    /// `analysis` ist nil, wenn die Sprechererkennung scheitert — das Transkript
+    /// soll daran nicht hängen bleiben (`speakerError` sagt, warum).
+    struct ConversationTranscript: Sendable {
+        let text: String
+        let segments: [(start: Double, end: Double, text: String)]
+        let analysis: SpeakerAnalysis?
+        let speakerError: String?
+    }
+
+    func transcribeConversation(
+        audioURL: URL,
+        language: String,
+        modelName: String,
+        clipsDirectory: URL,
+        onSpeakerPhase: @escaping @Sendable () async -> Void
+    ) async throws -> ConversationTranscript {
+        let resolvedLanguage = language.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Wort-Zeitstempel braucht die Sprecherzuordnung, um mitten im Satz
+        // wechseln zu können; VAD-Chunking schneidet an Sprechpausen.
+        let decodeOptions = DecodingOptions(
+            task: .transcribe,
+            language: resolvedLanguage.isEmpty ? nil : resolvedLanguage,
+            wordTimestamps: true,
+            chunkingStrategy: .vad
+        )
+
+        let pipeline = try await pipeline(modelName: modelName)
+        let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: audioURL.path)
+        let results = try await pipeline.transcribe(audioArray: audio, decodeOptions: decodeOptions)
+
+        let text = results
+            .map(\.text)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            throw LocalTranscriptionError.noText
+        }
+        let segments = results.flatMap { $0.segments }.map {
+            (start: Double($0.start),
+             end: Double($0.end),
+             text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        try Task.checkCancellation()
+        await onSpeakerPhase()
+        do {
+            let analysis = try await SpeakerRecognitionService.shared.analyze(
+                audio: audio,
+                transcription: results,
+                clipsDirectory: clipsDirectory
+            )
+            return ConversationTranscript(text: text, segments: segments, analysis: analysis, speakerError: nil)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return ConversationTranscript(
+                text: text,
+                segments: segments,
+                analysis: nil,
+                speakerError: error.localizedDescription
+            )
+        }
+    }
+
     private func pipeline(modelName: String) async throws -> WhisperKit {
         let resolvedModelName = Self.resolvedModelName(modelName)
         if let whisperKit, loadedModelName == resolvedModelName {

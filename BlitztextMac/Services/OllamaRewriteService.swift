@@ -27,7 +27,9 @@ enum OllamaRewriteService {
     }
 
     /// Formt Text lokal um. `instructions` ist der System-Prompt.
-    static func rewrite(text: String, instructions: String, model: String) async throws -> String {
+    /// `contextLength` überschreibt Ollamas Kontextfenster (Standard 2–4k Tokens) —
+    /// nötig für lange Eingaben wie Gesprächstranskripte, die sonst still gekürzt würden.
+    static func rewrite(text: String, instructions: String, model: String, contextLength: Int? = nil) async throws -> String {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/chat"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -39,7 +41,8 @@ enum OllamaRewriteService {
             messages: [
                 .init(role: "system", content: instructions),
                 .init(role: "user", content: text),
-            ]
+            ],
+            options: contextLength.map { ChatRequest.Options(num_ctx: $0) }
         )
         request.httpBody = try JSONEncoder().encode(body)
 
@@ -77,7 +80,9 @@ enum OllamaRewriteService {
         let model: String
         let stream: Bool
         let messages: [Message]
+        let options: Options?
         struct Message: Encodable { let role: String; let content: String }
+        struct Options: Encodable { let num_ctx: Int }
     }
 
     private struct ChatResponse: Decodable {
