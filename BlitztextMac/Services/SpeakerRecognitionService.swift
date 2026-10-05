@@ -162,16 +162,40 @@ actor SpeakerRecognitionService {
         let kit = try await loadedSpeakerKit()
         let diarization = try await kit.diarize(audioArray: audio, options: PyannoteDiarizationOptions())
 
-        let spans = diarization.segments.compactMap { segment -> SpeakerSpan? in
+        let rawSpans = diarization.segments.compactMap { segment -> SpeakerSpan? in
             guard let id = segment.speaker.speakerId else { return nil }
             return SpeakerSpan(speaker: id, start: Double(segment.startTime), end: Double(segment.endTime))
         }
+        let embedder = try await loadedEmbedder()
+
+        // Die Diarisierung trennt eine Stimme manchmal in zwei Cluster (z. B. eine
+        // Sprachnachricht, deren letzte Sätze anders klingen). Was laut Fingerabdruck
+        // dieselbe Person ist, wird wieder zusammengeführt.
+        let rawTalkTime = SpeakerTimeline.talkTime(rawSpans)
+        let rawExclusive = SpeakerTimeline.exclusiveSpans(rawSpans, minimumDuration: 1.0)
+        var rawVoiceprints: [Int: [Float]] = [:]
+        for (key, time) in rawTalkTime where time >= Self.minimumTalkTime {
+            rawVoiceprints[key] = try embedder.voiceprint(
+                audio: audio,
+                spans: rawExclusive[key] ?? [],
+                minimumSpeech: Self.minimumVoiceprintSpeech
+            )
+        }
+        let canonical = SpeakerClusterMerger.canonicalSpeakers(
+            voiceprints: rawVoiceprints,
+            talkTime: rawTalkTime,
+            threshold: VoiceMatchThresholds.standard.recognized
+        )
+        let spans = rawSpans.map { SpeakerSpan(speaker: canonical[$0.speaker] ?? $0.speaker, start: $0.start, end: $0.end) }
+
         let talkTime = SpeakerTimeline.talkTime(spans)
         let relevant = Set(talkTime.filter { $0.value >= Self.minimumTalkTime }.keys)
 
         let pieces = diarization.addSpeakerInfo(to: transcription).flatMap { $0 }.map { segment in
             AttributedPiece(
-                speaker: segment.speaker.speakerId.flatMap { relevant.contains($0) ? $0 : nil },
+                speaker: segment.speaker.speakerId
+                    .map { canonical[$0] ?? $0 }
+                    .flatMap { relevant.contains($0) ? $0 : nil },
                 start: Double(segment.startTime),
                 end: Double(segment.endTime),
                 text: SubtitleFormatter.strippingTokens(segment.text)
@@ -194,7 +218,6 @@ actor SpeakerRecognitionService {
 
         try FileManager.default.createDirectory(at: clipsDirectory, withIntermediateDirectories: true)
         let exclusive = SpeakerTimeline.exclusiveSpans(spans, minimumDuration: 1.0)
-        let embedder = try await loadedEmbedder()
 
         var speakers: [SpeakerAnalysis.Speaker] = []
         for key in order {
@@ -246,11 +269,20 @@ enum SpeakerRecognitionError: LocalizedError {
 
 /// Ruft das Pyannote-Embedder-Modell (WeSpeaker) direkt auf: 30 s Audio rein,
 /// je Maskenzeile ein 256-dimensionaler Fingerabdruck raus.
+///
+/// Wichtig: Die Vorverarbeitung normalisiert über den ganzen 30-s-Block, nicht
+/// nur über den maskierten Teil. Mit Stille (Nullen) aufgefüllte Blöcke liefern
+/// deshalb einen völlig anderen Fingerabdruck als volle — gemessen: dieselbe
+/// Stimme −0,09 statt 1,0. Kurze Sprache wird darum wiederholt, bis der Block
+/// voll ist (gemessen gleichwertig zu echtem Kontext: 1,00). Gemittelt wird
+/// über halb überlappende 10-s-Fenster, die Fenstergröße von Pyannote.
 final class VoiceEmbedder: @unchecked Sendable {
     private static let chunkSamples = 480_000   // 30 s bei 16 kHz
-    private static let maskFrames = 1767
+    private static let maskFrames = 1767        // 30 s
     private static let maskRows = 64
-    private static let maxChunks = 3
+    private static let windowFrames = 589       // 10 s
+    private static let windowStride = 294       // 5 s, halb überlappend
+    private static let maxChunks = 4
 
     private let preprocessor: MLModel
     private let embedder: MLModel
@@ -279,8 +311,9 @@ final class VoiceEmbedder: @unchecked Sendable {
         )
     }
 
-    /// Fingerabdruck aus den Abschnitten, in denen nur diese Person spricht.
-    /// Bis zu drei 30-s-Fenster über die Aufnahme verteilt, gemittelt.
+    /// Fingerabdruck aus den Abschnitten, in denen nur diese Person spricht:
+    /// Mittel über alle 10-s-Fenster aus bis zu vier über die Aufnahme
+    /// verteilten 30-s-Blöcken.
     func voiceprint(audio: [Float], spans: [TimeSpan], minimumSpeech: Double) throws -> [Float]? {
         var speech: [Float] = []
         for span in spans {
@@ -290,20 +323,30 @@ final class VoiceEmbedder: @unchecked Sendable {
         }
         guard Double(speech.count) / 16_000 >= minimumSpeech else { return nil }
 
-        let windows = min(Self.maxChunks, Int((Double(speech.count) / Double(Self.chunkSamples)).rounded(.up)))
-        let lastStart = max(0, speech.count - Self.chunkSamples)
-        var sum = [Float](repeating: 0, count: 0)
-
-        for index in 0..<windows {
-            let start = windows == 1 ? 0 : lastStart * index / (windows - 1)
-            let window = Array(speech[start..<min(speech.count, start + Self.chunkSamples)])
-            let vector = VoiceVectorMath.normalized(try embedding(of: window))
-            sum = sum.isEmpty ? vector : zip(sum, vector).map { $0 + $1 }
+        // Nie mit Stille auffüllen (siehe oben): kurze Sprache wiederholen.
+        if speech.count < Self.chunkSamples {
+            let original = speech
+            while speech.count < Self.chunkSamples {
+                speech.append(contentsOf: original.prefix(Self.chunkSamples - speech.count))
+            }
         }
-        return VoiceVectorMath.normalized(sum)
+
+        let chunks = min(Self.maxChunks, Int((Double(speech.count) / Double(Self.chunkSamples)).rounded(.up)))
+        let lastStart = max(0, speech.count - Self.chunkSamples)
+        var sum: [Float] = []
+
+        for index in 0..<chunks {
+            let start = chunks == 1 ? 0 : lastStart * index / (chunks - 1)
+            let chunk = Array(speech[start..<min(speech.count, start + Self.chunkSamples)])
+            for window in try windowEmbeddings(of: chunk) {
+                let vector = VoiceVectorMath.normalized(window)
+                sum = sum.isEmpty ? vector : zip(sum, vector).map { $0 + $1 }
+            }
+        }
+        return sum.isEmpty ? nil : VoiceVectorMath.normalized(sum)
     }
 
-    private func embedding(of samples: [Float]) throws -> [Float] {
+    private func windowEmbeddings(of samples: [Float]) throws -> [[Float]] {
         // Float32-Eingaben; CoreML wandelt in das Float16 des Modells. Den Swift-Typ
         // Float16 gibt es auf Intel-Macs nicht — der Universal-Build bräche sonst.
         let waveform = try MLMultiArray(shape: [1, NSNumber(value: Self.chunkSamples)], dataType: .float32)
@@ -317,7 +360,7 @@ final class VoiceEmbedder: @unchecked Sendable {
             throw SpeakerKitError.invalidModelOutput("Stimm-Vorverarbeitung lieferte keine Merkmale")
         }
 
-        // Maske: Zeile 0 markiert die Frames mit echter Sprache, Rest bleibt leer.
+        // Je Maskenzeile ein 10-s-Fenster. Der Block ist immer voll (siehe voiceprint).
         let maskCount = Self.maskRows * Self.maskFrames
         let mask = try MLMultiArray(
             shape: [1, NSNumber(value: Self.maskRows), NSNumber(value: Self.maskFrames)],
@@ -325,8 +368,14 @@ final class VoiceEmbedder: @unchecked Sendable {
         )
         let maskPointer = mask.dataPointer.bindMemory(to: Float.self, capacity: maskCount)
         for index in 0..<maskCount { maskPointer[index] = 0 }
-        let validFrames = min(Self.maskFrames, samples.count * Self.maskFrames / Self.chunkSamples)
-        for frame in 0..<validFrames { maskPointer[frame] = 1 }
+
+        var rows = 0
+        for windowStart in stride(from: 0, through: Self.maskFrames - Self.windowFrames, by: Self.windowStride) {
+            for frame in windowStart..<(windowStart + Self.windowFrames) {
+                maskPointer[rows * Self.maskFrames + frame] = 1
+            }
+            rows += 1
+        }
 
         let output = try embedder.prediction(from: MLDictionaryFeatureProvider(dictionary: [
             "preprocessor_output_1": preprocessed,
@@ -336,7 +385,9 @@ final class VoiceEmbedder: @unchecked Sendable {
             throw SpeakerKitError.invalidModelOutput("Stimm-Modell lieferte keinen Fingerabdruck")
         }
         let size = embeddings.shape[2].intValue
-        return (0..<size).map { embeddings[[0, 0, NSNumber(value: $0)]].floatValue }
+        return (0..<rows).map { row in
+            (0..<size).map { embeddings[[0, NSNumber(value: row), NSNumber(value: $0)]].floatValue }
+        }
     }
 }
 
