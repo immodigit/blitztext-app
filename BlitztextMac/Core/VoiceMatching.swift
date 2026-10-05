@@ -124,3 +124,61 @@ public enum SpeakerAssignment: Equatable, Sendable {
         }
     }
 }
+
+/// Führt Cluster derselben Aufnahme zusammen, die laut Fingerabdruck dieselbe
+/// Person sind. Die Diarisierung trennt manchmal eine Stimme in zwei Cluster,
+/// etwa wenn sich Tonfall oder Abstand zum Mikrofon gegen Ende ändert.
+public enum SpeakerClusterMerger {
+    /// Liefert je Sprecher den Sprecher, dem er zugeschlagen wird (sich selbst,
+    /// wenn er bleibt). Complete Linkage: Eine Gruppe entsteht nur, wenn jedes
+    /// Paar darin ähnlich genug ist — so verschmelzen zwei verschiedene Stimmen
+    /// nicht über ein Mittelglied. Vertreter ist das Mitglied mit der meisten Redezeit.
+    public static func canonicalSpeakers(
+        voiceprints: [Int: [Float]],
+        talkTime: [Int: Double],
+        threshold: Float
+    ) -> [Int: Int] {
+        var groups: [[Int]] = voiceprints.keys.sorted().map { [$0] }
+
+        func linkage(_ a: [Int], _ b: [Int]) -> Float {
+            var lowest = Float.infinity
+            for x in a {
+                for y in b {
+                    guard let vx = voiceprints[x], let vy = voiceprints[y] else { return -1 }
+                    lowest = min(lowest, VoiceVectorMath.cosine(vx, vy))
+                }
+            }
+            return lowest
+        }
+
+        while groups.count > 1 {
+            var best: (i: Int, j: Int, similarity: Float)?
+            for i in groups.indices {
+                for j in groups.indices where j > i {
+                    let similarity = linkage(groups[i], groups[j])
+                    if similarity >= threshold, similarity > (best?.similarity ?? -.infinity) {
+                        best = (i, j, similarity)
+                    }
+                }
+            }
+            guard let best else { break }
+            groups[best.i] += groups[best.j]
+            groups.remove(at: best.j)
+        }
+
+        var result: [Int: Int] = [:]
+        for key in Set(talkTime.keys).union(voiceprints.keys) {
+            result[key] = key
+        }
+        for group in groups {
+            let representative = group.max { lhs, rhs in
+                let left = talkTime[lhs] ?? 0, right = talkTime[rhs] ?? 0
+                return left == right ? lhs > rhs : left < right
+            } ?? group[0]
+            for member in group {
+                result[member] = representative
+            }
+        }
+        return result
+    }
+}

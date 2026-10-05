@@ -622,6 +622,42 @@ do {
           "Sprecher A", "gelöschtes Profil fällt auf den Platzhalter zurück")
 }
 
+// MARK: - Sprechererkennung: übertrennte Cluster zusammenführen
+
+do {
+    let canonical = SpeakerClusterMerger.canonicalSpeakers(
+        voiceprints: [0: [1, 0], 1: [0.95, 0.31]],
+        talkTime: [0: 39, 1: 10],
+        threshold: 0.7
+    )
+    equal(canonical, [0: 0, 1: 0], "zwei Cluster derselben Stimme werden eine Person (die mit mehr Redezeit)")
+}
+
+do {
+    let canonical = SpeakerClusterMerger.canonicalSpeakers(
+        voiceprints: [0: [1, 0], 1: [0, 1]],
+        talkTime: [0: 10, 1: 50],
+        threshold: 0.7
+    )
+    equal(canonical, [0: 0, 1: 1], "verschiedene Stimmen bleiben getrennt")
+}
+
+do {
+    // A~B und B~C ähnlich, A und C aber nicht: keine Kette über B.
+    let a: [Float] = [1, 0, 0]
+    let b: [Float] = VoiceVectorMath.normalized([1, 1, 0])
+    let c: [Float] = [0, 1, 0]
+    let canonical = SpeakerClusterMerger.canonicalSpeakers(
+        voiceprints: [0: a, 1: b, 2: c],
+        talkTime: [0: 30, 1: 20, 2: 10],
+        threshold: 0.7
+    )
+    check(canonical[0] != canonical[2], "zwei verschiedene Stimmen verschmelzen nicht über ein Mittelglied")
+}
+
+equal(SpeakerClusterMerger.canonicalSpeakers(voiceprints: [0: [1, 0]], talkTime: [0: 30, 1: 9], threshold: 0.7),
+      [0: 0, 1: 1], "Sprecher ohne Fingerabdruck bleiben unverändert")
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")
