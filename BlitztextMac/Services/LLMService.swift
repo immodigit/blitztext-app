@@ -123,6 +123,50 @@ enum LLMService {
         )
     }
 
+    /// Bis zu dieser Länge passt ein Transkript samt Notiz in das kleine
+    /// Kontextfenster (4096 Tokens) von Apples On-Device-Modell (~5 Min. Gespräch).
+    static let appleConversationNoteLimit = 8_000
+
+    /// Gesprächsnotiz aus einem Transkript mit Sprechernamen.
+    static func conversationNote(
+        transcript: String,
+        localEngine: LocalRewriteEngine = .none
+    ) async throws -> String {
+        if localEngine == .apple, transcript.count > appleConversationNoteLimit {
+            throw LLMError.apiError("Das Gespräch ist zu lang für Apples On-Device-Modell (etwa 5 Minuten). Mit Ollama oder im Online-Modus klappt es.")
+        }
+        return try await run(
+            text: transcript,
+            systemPrompt: conversationNotePrompt,
+            model: .fastEdit,
+            temperature: 0.2,
+            localEngine: localEngine,
+            // Ein Stunden-Gespräch hat schnell 15k Tokens; Ollamas Standard würde still kürzen.
+            ollamaContextLength: 32_768
+        )
+    }
+
+    private static let conversationNotePrompt = """
+    Du erstellst aus einem Gesprächstranskript eine knappe Gesprächsnotiz auf Deutsch.
+    Jede Zeile des Transkripts hat das Format „[mm:ss] Name: Text“. Die Namen sind die \
+    Gesprächsteilnehmer; „Sprecher A“, „Sprecher B“ usw. sind noch nicht benannte Personen.
+
+    Aufbau der Notiz:
+    Teilnehmer: Namen, durch Komma getrennt
+    Worum ging es: zwei bis drei Sätze
+    Was jede Person gesagt hat: je Person eine Überschrift mit dem Namen, darunter zwei bis \
+    fünf Stichpunkte mit dem, was sie berichtet, gefordert, angeboten oder entschieden hat
+    Vereinbarungen und nächste Schritte: Stichpunkte, jeweils mit verantwortlicher Person, \
+    falls im Gespräch genannt
+    Offene Fragen: nur falls vorhanden
+
+    Regeln:
+    - Nichts erfinden. Aussagen nur der Person zuordnen, der sie im Transkript zugeordnet sind.
+    - Zahlen, Beträge, Orte und Namen exakt übernehmen.
+    - Keine Einleitung, kein Schlusssatz, keine Rückfragen.
+    - Schlichter Text mit Bindestrich-Aufzählungen, kein Markdown mit # oder **.
+    """
+
     /// Wählt das Backend. Bei einem lokal gewählten Lauf wird bewusst NICHT
     /// still auf die Cloud zurückgefallen — sonst würde das lokale Versprechen
     /// unbemerkt gebrochen (ein Fehler wird durchgereicht).
@@ -131,7 +175,8 @@ enum LLMService {
         systemPrompt: String,
         model: RewriteModel,
         temperature: Double,
-        localEngine: LocalRewriteEngine
+        localEngine: LocalRewriteEngine,
+        ollamaContextLength: Int? = nil
     ) async throws -> String {
         switch localEngine {
         case .apple:
@@ -140,7 +185,12 @@ enum LLMService {
                 return LocalRewriteSanitizer.clean(output)
             }
         case .ollama(let ollamaModel):
-            let output = try await OllamaRewriteService.rewrite(text: text, instructions: systemPrompt, model: ollamaModel)
+            let output = try await OllamaRewriteService.rewrite(
+                text: text,
+                instructions: systemPrompt,
+                model: ollamaModel,
+                contextLength: ollamaContextLength
+            )
             return LocalRewriteSanitizer.clean(output)
         case .none:
             break

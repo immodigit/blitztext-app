@@ -21,6 +21,16 @@ enum AppSupportPaths {
         appSupportDirectoryURL.appendingPathComponent("models", isDirectory: true)
     }
 
+    /// Download-Basis für die SpeakerKit-Modelle (Sprechererkennung).
+    static var speakerKitModelsDirectoryURL: URL {
+        localModelsDirectoryURL.appendingPathComponent("speakerkit", isDirectory: true)
+    }
+
+    /// Stimmprofile: profiles.json plus je Profil eine kurze Hörprobe (.wav).
+    static var voiceProfilesDirectoryURL: URL {
+        appSupportDirectoryURL.appendingPathComponent("voices", isDirectory: true)
+    }
+
     static var whisperKitModelsDirectoryURL: URL {
         localModelsDirectoryURL.appendingPathComponent("whisperkit", isDirectory: true)
     }

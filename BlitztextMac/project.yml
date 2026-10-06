@@ -58,6 +58,8 @@ targets:
       - target: BlitztextCore
       - package: ArgmaxOSS
         product: WhisperKit
+      - package: ArgmaxOSS
+        product: SpeakerKit
     entitlements:
       path: Resources/BlitztextMac.entitlements
       properties:
