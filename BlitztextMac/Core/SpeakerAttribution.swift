@@ -262,3 +262,61 @@ public enum TranscriptQuote {
         return cut.trimmingCharacters(in: .whitespaces) + " …"
     }
 }
+
+/// Redeanteil einer Person (oder des Sammelsegments „Weitere“) fürs Diagramm.
+public struct TalkShare: Equatable, Sendable {
+    public let name: String
+    public let seconds: Double
+    public let percent: Int
+    public let colorSlot: Int?
+
+    public init(name: String, seconds: Double, percent: Int, colorSlot: Int?) {
+        self.name = name
+        self.seconds = seconds
+        self.percent = percent
+        self.colorSlot = colorSlot
+    }
+}
+
+public enum TalkShareCalculator {
+    /// `entries` in der Reihenfolge des ersten Wortbeitrags. Gleiche Namen werden
+    /// addiert (aufgespaltene Cluster derselben Person). Die `maxColored` Personen
+    /// mit der meisten Redezeit bekommen eine Farbe — vergeben nach erstem
+    /// Wortbeitrag, damit die Farbe an der Person hängt und nicht am Rang.
+    /// Mehr als eine übrige Person wird zu „Weitere (n)“ zusammengefasst.
+    public static func shares(_ entries: [(name: String, seconds: Double)], maxColored: Int) -> [TalkShare] {
+        var order: [String] = []
+        var seconds: [String: Double] = [:]
+        for entry in entries where entry.seconds > 0 {
+            if seconds[entry.name] == nil { order.append(entry.name) }
+            seconds[entry.name, default: 0] += entry.seconds
+        }
+        let total = seconds.values.reduce(0, +)
+        guard total > 0 else { return [] }
+
+        let ranked = order.sorted { (seconds[$0] ?? 0) > (seconds[$1] ?? 0) }
+        let colored = Array(ranked.prefix(maxColored))
+        let rest = Array(ranked.dropFirst(maxColored))
+        let slots = order.filter(colored.contains).enumerated()
+            .reduce(into: [String: Int]()) { $0[$1.element] = $1.offset }
+
+        var slices: [(name: String, seconds: Double, slot: Int?)] = colored.map { ($0, seconds[$0] ?? 0, slots[$0]) }
+        if rest.count == 1, let only = rest.first {
+            slices.append((only, seconds[only] ?? 0, nil))
+        } else if rest.count > 1 {
+            slices.append(("Weitere (\(rest.count))", rest.reduce(0) { $0 + (seconds[$1] ?? 0) }, nil))
+        }
+
+        // Größter-Rest-Verfahren: gerundete Prozente ergeben zusammen genau 100.
+        let exact = slices.map { $0.seconds / total * 100 }
+        var percents = exact.map { Int($0.rounded(.down)) }
+        let missing = 100 - percents.reduce(0, +)
+        for index in exact.indices.sorted(by: { exact[$0] - Double(percents[$0]) > exact[$1] - Double(percents[$1]) }).prefix(missing) {
+            percents[index] += 1
+        }
+
+        return slices.enumerated().map { index, slice in
+            TalkShare(name: slice.name, seconds: slice.seconds, percent: percents[index], colorSlot: slice.slot)
+        }
+    }
+}

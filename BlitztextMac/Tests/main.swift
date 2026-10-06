@@ -658,6 +658,43 @@ do {
 equal(SpeakerClusterMerger.canonicalSpeakers(voiceprints: [0: [1, 0]], talkTime: [0: 30, 1: 9], threshold: 0.7),
       [0: 0, 1: 1], "Sprecher ohne Fingerabdruck bleiben unverändert")
 
+// MARK: - Sprechererkennung: Redeanteile
+
+do {
+    let shares = TalkShareCalculator.shares([(name: "Chris", seconds: 13), (name: "Daniel", seconds: 39)], maxColored: 4)
+    equal(shares.map(\.name), ["Daniel", "Chris"], "Anteile sind nach Redezeit absteigend sortiert")
+    equal(shares.map(\.percent), [75, 25], "Prozent je Person")
+    equal(shares.map(\.colorSlot), [1, 0], "Farbe folgt der Person (Reihenfolge des ersten Wortbeitrags), nicht dem Rang")
+}
+
+do {
+    let shares = TalkShareCalculator.shares([(name: "Chris", seconds: 30), (name: "Daniel", seconds: 50), (name: "Chris", seconds: 20)], maxColored: 4)
+    equal(shares.map(\.name), ["Chris", "Daniel"], "zwei Cluster derselben Person zählen zusammen")
+    equal(shares.first?.seconds, 50, "Redezeit wird addiert")
+}
+
+do {
+    let shares = TalkShareCalculator.shares([(name: "A", seconds: 1), (name: "B", seconds: 1), (name: "C", seconds: 1)], maxColored: 4)
+    equal(shares.map(\.percent).reduce(0, +), 100, "Prozente ergeben zusammen immer 100")
+}
+
+do {
+    let entries = (1...6).map { (name: "P\($0)", seconds: Double(70 - $0 * 10)) }
+    let shares = TalkShareCalculator.shares(entries, maxColored: 4)
+    equal(shares.count, 5, "mehr Personen als Farben: der Rest wird zusammengefasst")
+    equal(shares.last?.name, "Weitere (2)", "Sammelsegment nennt die Anzahl")
+    equal(shares.last?.colorSlot, nil, "Sammelsegment ist neutral, keine Personenfarbe")
+}
+
+do {
+    let entries = (1...5).map { (name: "P\($0)", seconds: Double(60 - $0 * 10)) }
+    let shares = TalkShareCalculator.shares(entries, maxColored: 4)
+    equal(shares.last?.name, "P5", "eine einzelne übrige Person behält ihren Namen")
+    equal(shares.last?.colorSlot, nil, "ohne freie Farbe bleibt sie neutral")
+}
+
+equal(TalkShareCalculator.shares([(name: "A", seconds: 0)], maxColored: 4), [], "ohne Redezeit kein Diagramm")
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")
