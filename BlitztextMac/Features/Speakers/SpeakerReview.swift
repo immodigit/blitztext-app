@@ -69,6 +69,15 @@ struct SpeakerReview: Equatable {
         speakers[index].assignment = assignment
     }
 
+    /// Redeanteile je Person mit den aktuellen Namen (fürs Kreisdiagramm).
+    func talkShares(profileName: (UUID) -> String?, maxColored: Int) -> [TalkShare] {
+        let entries = speakers.map { speaker in
+            (name: speaker.assignment.displayName(placeholder: speaker.placeholder, profileName: profileName),
+             seconds: speaker.talkTime)
+        }
+        return TalkShareCalculator.shares(entries, maxColored: maxColored)
+    }
+
     /// Transkript mit den aktuellen Namen. Ordnet der Nutzer zwei Cluster
     /// derselben Person zu (die Diarisierung hat sie aufgespalten), werden
     /// deren aufeinanderfolgende Beiträge wieder zu einem zusammengeführt.

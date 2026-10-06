@@ -23,6 +23,11 @@ struct SpeakerReviewSection: View {
                 }
             }
 
+            TalkShareChart(shares: review.talkShares(
+                profileName: { appState.voiceProfiles.profile($0)?.name },
+                maxColored: TalkShareChart.palette.count
+            ))
+
             ForEach(review.speakers) { speaker in
                 if speaker.assignment.needsDecision {
                     PendingSpeakerCard(appState: appState, speaker: speaker)
