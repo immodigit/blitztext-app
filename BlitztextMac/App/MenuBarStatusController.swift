@@ -5,6 +5,8 @@ enum MenuBarStatus: Equatable {
     case idle
     case recording(WorkflowType)
     case processing(WorkflowType)
+    /// Sprachnachricht/Datei wird transkribiert; Prozent, sofern bekannt (nur lokal).
+    case transcribingFile(percent: Int?)
     case success(WorkflowType?)
     case error(WorkflowType?)
 }
@@ -24,6 +26,12 @@ final class MenuBarStatusController {
     }
 
     func update(to status: MenuBarStatus) {
+        // Reiner Fortschritts-Tick: nur neu zeichnen, Animation nicht neu starten.
+        if case .transcribingFile = currentStatus, case .transcribingFile = status {
+            currentStatus = status
+            renderCurrentStatus()
+            return
+        }
         currentStatus = status
         animationFrame = 0
         configureAnimationIfNeeded()
@@ -36,7 +44,7 @@ final class MenuBarStatusController {
         switch currentStatus {
         case .recording:
             startAnimation(interval: 0.12)
-        case .processing:
+        case .processing, .transcribingFile:
             startAnimation(interval: 0.18)
         default:
             break
@@ -67,6 +75,18 @@ final class MenuBarStatusController {
         button.image = MenuBarStatusIconRenderer.makeImage(for: currentStatus, frame: animationFrame)
         button.image?.isTemplate = true
         button.toolTip = tooltip(for: currentStatus)
+
+        // Prozent neben dem Blitz, damit der Fortschritt auch bei geschlossenem Popover sichtbar ist.
+        if case .transcribingFile(let percent?) = currentStatus {
+            button.attributedTitle = NSAttributedString(
+                string: " \(percent) %",
+                attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)]
+            )
+            button.imagePosition = .imageLeading
+        } else {
+            button.title = ""
+            button.imagePosition = .imageOnly
+        }
     }
 
     private func tooltip(for status: MenuBarStatus) -> String {
@@ -77,6 +97,11 @@ final class MenuBarStatusController {
             return "\(type.displayName): Aufnahme läuft"
         case .processing(let type):
             return "\(type.displayName): Verarbeitung läuft"
+        case .transcribingFile(let percent):
+            if let percent {
+                return "Sprachnachricht wird transkribiert (\(percent) %)"
+            }
+            return "Sprachnachricht wird transkribiert"
         case .success(let type):
             if let type {
                 return "\(type.displayName): Fertig"
@@ -114,6 +139,14 @@ private enum MenuBarStatusIconRenderer {
                 drawActivityBadge(
                     type: type,
                     systemName: badgeSymbol(for: type),
+                    in: bounds,
+                    frame: frame,
+                    phase: .processing
+                )
+            case .transcribingFile:
+                drawActivityBadge(
+                    type: .transcription,
+                    systemName: "waveform",
                     in: bounds,
                     frame: frame,
                     phase: .processing
@@ -159,7 +192,7 @@ private enum MenuBarStatusIconRenderer {
     /// Volldeckend in Ruhe; sanftes Pulsieren während Aufnahme/Verarbeitung.
     private static func boltAlpha(for status: MenuBarStatus, frame: Int) -> CGFloat {
         switch status {
-        case .recording, .processing:
+        case .recording, .processing, .transcribingFile:
             let pulse: [CGFloat] = [1.0, 0.78, 0.55, 0.78]
             return pulse[frame % pulse.count]
         default:
