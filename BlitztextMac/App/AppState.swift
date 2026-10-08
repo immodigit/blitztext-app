@@ -53,7 +53,9 @@ final class AppState {
         }
     }
     var accessibilityPermissionGranted = false
-    var fileTranscriptionState: FileTranscriptionState = .idle
+    var fileTranscriptionState: FileTranscriptionState = .idle {
+        didSet { syncMenuBarStatusWithFileTranscription() }
+    }
     private var fileTranscriptionTask: Task<Void, Never>?
     private var lastTranscriptionSourceURL: URL?
     private var fileTranscriptionQueue: [FileTranscriptionJob] = []
@@ -348,7 +350,7 @@ final class AppState {
         activeLaunchSource = .manual
         menuBarStatusResetTask?.cancel()
         workflowCleanupTask?.cancel()
-        menuBarStatus = .idle
+        menuBarStatus = restingMenuBarStatus
         page = .main
     }
 
@@ -467,6 +469,43 @@ final class AppState {
                     ? .failed(summary)
                     : .done(text: summary, fileName: "Stapel-Bilanz", savedToFile: true)
             }
+        }
+    }
+
+    /// Status, auf den die Menüleiste zurückfällt, wenn kein Diktat läuft:
+    /// eine laufende Datei-Transkription bleibt sichtbar.
+    private var restingMenuBarStatus: MenuBarStatus {
+        if case let .running(_, progress) = fileTranscriptionState {
+            return .transcribingFile(percent: progress.map { Int(($0 * 100).rounded(.down)) })
+        }
+        return .idle
+    }
+
+    /// Spiegelt die Datei-Transkription in der Menüleiste. Ein laufendes Diktat hat Vorrang —
+    /// dessen Aufräumen fällt danach auf `restingMenuBarStatus` zurück.
+    private func syncMenuBarStatusWithFileTranscription() {
+        if let workflow = activeWorkflow, workflow.phase.isActive { return }
+        switch menuBarStatus {
+        case .idle, .transcribingFile:
+            break
+        default:
+            return
+        }
+
+        switch fileTranscriptionState {
+        case .running:
+            menuBarStatus = restingMenuBarStatus
+        case .done where fileTranscriptionQueue.isEmpty:
+            menuBarStatus = .success(nil)
+            scheduleMenuBarStatusReset(after: 1.6)
+        case .failed:
+            menuBarStatus = .error(nil)
+            scheduleMenuBarStatusReset(after: 1.6)
+        case .done:
+            // Stapel: Zwischenergebnis — die nächste Datei startet sofort.
+            break
+        case .idle:
+            menuBarStatus = .idle
         }
     }
 
@@ -1154,7 +1193,7 @@ final class AppState {
         switch phase {
         case .idle:
             if activeWorkflow == nil {
-                menuBarStatus = .idle
+                menuBarStatus = restingMenuBarStatus
             }
 
         case .running:
@@ -1194,7 +1233,7 @@ final class AppState {
             if !self.isPopoverShown {
                 self.page = .main
             }
-            self.menuBarStatus = .idle
+            self.menuBarStatus = self.restingMenuBarStatus
         }
     }
 
@@ -1203,7 +1242,7 @@ final class AppState {
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
             if self.activeWorkflow == nil || !(self.activeWorkflow?.phase.isActive ?? false) {
-                self.menuBarStatus = .idle
+                self.menuBarStatus = self.restingMenuBarStatus
             }
         }
     }

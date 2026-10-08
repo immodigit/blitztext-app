@@ -37,7 +37,8 @@ final class StatusHUDController {
             model.phase = .processing(type)
             showPanel()
             stopLevelUpdates()
-        case .idle, .success, .error:
+        case .idle, .success, .error, .transcribingFile:
+            // Datei-Transkription läuft oft minutenlang — dafür reicht die Menüleiste.
             hidePanel()
         }
     }
