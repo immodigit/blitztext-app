@@ -31,6 +31,14 @@ enum FileTranscriptionState: Equatable {
     case failed(String)
 }
 
+/// Stand der Übergabe an den Webhook (z. B. n8n → Wissensdatenbank).
+enum WebhookDeliveryState: Equatable {
+    case idle
+    case sending
+    case sent
+    case failed(String)
+}
+
 /// Ein Transkriptions-Auftrag in der Warteschlange.
 struct FileTranscriptionJob {
     let url: URL
@@ -60,6 +68,14 @@ final class AppState {
     private var fileTranscriptionWrittenOutputs: [URL] = []
     private var isProcessingFileTranscriptionQueue = false
     private var currentFileTranscriptionLabel = ""
+    /// Webhook-Übergabe der gerade gezeigten Sprachnachricht.
+    var fileWebhookState: WebhookDeliveryState = .idle
+    /// Nutzlast der zuletzt transkribierten Sprachnachricht — für „An Webhook senden“ von Hand.
+    private(set) var lastVoiceMessagePayload: WebhookPayload?
+    /// Ergebnis des Test-Knopfs in den Einstellungen.
+    var webhookTestState: WebhookDeliveryState = .idle
+    /// Letzte automatische Übergabe eines Diktats/einer Umformung (Anzeige in den Einstellungen).
+    var lastBackgroundWebhookState: WebhookDeliveryState = .idle
     // Umformer-Textbox (Blitztext+, $%&!, :))
     var improverInputText = ""
     var improverType: WorkflowType = .textImprover
@@ -108,6 +124,9 @@ final class AppState {
     var emojiTextSettings: EmojiTextSettings {
         didSet { saveSettings() }
     }
+    var webhookSettings: WebhookSettings {
+        didSet { saveSettings() }
+    }
 
     // Hotkeys
     let hotkeyService = HotkeyService()
@@ -136,6 +155,7 @@ final class AppState {
         self.textImprovementSettings = Self.loadTextImprovementSettings()
         self.dampfAblassenSettings = Self.loadDampfAblassenSettings()
         self.emojiTextSettings = Self.loadEmojiTextSettings()
+        self.webhookSettings = Self.loadContainer()?.webhook ?? .default
         self.transcriptHistory = Self.loadHistory()
         hotkeyService.bindings = appSettings.hotkeyBindings
         refreshAccessibilityPermission()
@@ -413,6 +433,8 @@ final class AppState {
 
             var succeeded = 0
             var failures: [String] = []
+            var webhookFailures: [String] = []
+            var lastWebhookError = ""
 
             while !fileTranscriptionQueue.isEmpty {
                 if Task.isCancelled { return }
@@ -448,6 +470,16 @@ final class AppState {
                         fileName: job.url.lastPathComponent,
                         savedToFile: job.writeTextFile
                     )
+                    let payload = await voiceMessagePayload(text: result.text, cues: result.cues, source: job.url)
+                    lastVoiceMessagePayload = payload
+                    fileWebhookState = .idle
+                    if webhookSettings.sendsAutomatically(.voiceMessage) {
+                        await deliverVoiceMessage(payload)
+                        if case let .failed(message) = fileWebhookState {
+                            webhookFailures.append(job.url.lastPathComponent)
+                            lastWebhookError = message
+                        }
+                    }
                 } catch is CancellationError {
                     return
                 } catch {
@@ -466,6 +498,15 @@ final class AppState {
                 fileTranscriptionState = succeeded == 0
                     ? .failed(summary)
                     : .done(text: summary, fileName: "Stapel-Bilanz", savedToFile: true)
+                // Die Bilanz ist keine Sprachnachricht — nicht von Hand an den Webhook schicken lassen.
+                lastVoiceMessagePayload = nil
+            }
+            // Im Stapel nennen, welche Dateien nicht ankamen; „Erneut senden“ träfe nur die letzte.
+            if succeeded > 1, !webhookFailures.isEmpty {
+                lastVoiceMessagePayload = nil
+                fileWebhookState = .failed(
+                    "\(webhookFailures.count) von \(succeeded) nicht an den Webhook gesendet (\(webhookFailures.joined(separator: ", "))). \(lastWebhookError)"
+                )
             }
         }
     }
@@ -487,7 +528,87 @@ final class AppState {
         fileTranscriptionWrittenOutputs.removeAll()
         isProcessingFileTranscriptionQueue = false
         fileTranscriptionState = .idle
+        fileWebhookState = .idle
+        lastVoiceMessagePayload = nil
         page = .main
+    }
+
+    // MARK: - Webhook (z. B. n8n → Wissensdatenbank)
+
+    /// Schickt die gezeigte Sprachnachricht von Hand (Auto-Versand aus oder fehlgeschlagen).
+    func sendVoiceMessageToWebhook() {
+        guard let payload = lastVoiceMessagePayload else { return }
+        Task { await deliverVoiceMessage(payload) }
+    }
+
+    func sendWebhookTest() {
+        webhookTestState = .sending
+        Task {
+            do {
+                try await WebhookService.send(.test(appVersion: WebhookService.appVersion))
+                webhookTestState = .sent
+            } catch {
+                webhookTestState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func deliverVoiceMessage(_ payload: WebhookPayload) async {
+        fileWebhookState = .sending
+        do {
+            try await WebhookService.send(payload)
+            fileWebhookState = .sent
+        } catch is CancellationError {
+            fileWebhookState = .idle
+        } catch {
+            fileWebhookState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func voiceMessagePayload(text: String, cues: [SubtitleCue], source url: URL) async -> WebhookPayload {
+        let metadata = await AudioMetadataReader.read(from: url)
+        return WebhookPayload(
+            source: .voiceMessage,
+            workflow: nil,
+            text: text,
+            language: transcriptionSettings.language,
+            transcription: appSettings.secureLocalModeEnabled ? .local : .openAI,
+            fileName: url.lastPathComponent,
+            recordedAt: metadata.recordedAt,
+            durationSeconds: metadata.durationSeconds,
+            segments: cues,
+            appVersion: WebhookService.appVersion
+        )
+    }
+
+    /// Diktate und Umformungen gehen nur raus, wenn der Nutzer das für diese Quelle gewählt hat.
+    private func deliverWorkflowOutputIfWanted(_ text: String, type: WorkflowType?) {
+        // Fehlt die URL oder ist sie kaputt, zeigt die Einstellung den Fehler — nicht still überspringen.
+        guard let type, webhookSettings.sendsAutomatically(WebhookSource(workflow: type)) else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let payload = WebhookPayload(
+            source: WebhookSource(workflow: type),
+            workflow: type,
+            text: trimmed,
+            language: transcriptionSettings.language,
+            transcription: (type == .localTranscription || appSettings.secureLocalModeEnabled) ? .local : .openAI,
+            fileName: nil,
+            recordedAt: nil,
+            durationSeconds: nil,
+            segments: [],
+            appVersion: WebhookService.appVersion
+        )
+        lastBackgroundWebhookState = .sending
+        Task {
+            do {
+                try await WebhookService.send(payload)
+                lastBackgroundWebhookState = .sent
+            } catch {
+                lastBackgroundWebhookState = .failed(error.localizedDescription)
+            }
+        }
     }
 
     // MARK: - Blitztext+ Textbox (tippen oder diktieren → umformen)
@@ -975,7 +1096,8 @@ final class AppState {
             transcription: transcriptionSettings,
             textImprovement: textImprovementSettings,
             dampfAblassen: dampfAblassenSettings,
-            emojiText: emojiTextSettings
+            emojiText: emojiTextSettings,
+            webhook: webhookSettings
         )
         if let data = try? JSONEncoder().encode(container) {
             try? data.write(to: Self.settingsURL)
@@ -1131,6 +1253,7 @@ final class AppState {
 
     private func handleWorkflowOutput(_ text: String) {
         recordInHistory(text, type: activeWorkflow?.type)
+        deliverWorkflowOutputIfWanted(text, type: activeWorkflow?.type)
         pasteAtCursor(text, target: activePasteTarget)
         if activeLaunchSource == .hotkeyBackground {
             page = .main
@@ -1289,6 +1412,7 @@ private struct SettingsContainer: Codable {
     var textImprovement: TextImprovementSettings
     var dampfAblassen: DampfAblassenSettings?
     var emojiText: EmojiTextSettings?
+    var webhook: WebhookSettings?
 }
 
 // MARK: - Notification for Popover Dismissal

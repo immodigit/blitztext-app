@@ -12,6 +12,10 @@ When **Sicherer Lokaler Modus** is enabled and a WhisperKit/CoreML model is inst
 
 You are responsible for your OpenAI account, API usage, costs, and data handling.
 
+## Webhook (opt-in)
+
+If you enable **Webhook** in the settings, the sources you select (voice messages, dictations, rewrites) are sent as plain-text JSON to the URL you entered. This also applies in **Sicherer Lokaler Modus**: secure local mode keeps transcription on the Mac, not the hand-off you switch on yourself. Plain `http://` is only accepted for `localhost`; everything else must use `https://`. Webhook URL and token are stored in the macOS Keychain. Details: [webhook.md](webhook.md).
+
 ## Local Data
 
 The app stores:
