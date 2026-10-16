@@ -440,6 +440,50 @@ do {
     equal(recorder.state, .idle, "reset räumt auf")
 }
 
+// MARK: - Verlauf „Zuletzt“: Sprachnachrichten
+
+do {
+    let dictation = TranscriptHistoryEntry(text: "Hallo Welt", type: .transcription, date: Date())
+    let memo = TranscriptHistoryEntry(
+        text: "Bitte morgen zurückrufen.",
+        type: .localTranscription,
+        date: Date(),
+        voiceMessage: VoiceMessageReference(fileName: "Memo 12.m4a", sourcePath: "/tmp/memos/Memo 12.m4a")
+    )
+
+    equal(dictation.tapAction, .copyText, "Diktat-Eintrag kopiert beim Antippen")
+    equal(memo.tapAction, .openVoiceMessage, "Sprachnachricht-Eintrag öffnet das Ergebnisfenster")
+
+    let history = TranscriptHistory.inserting(memo, into: [dictation], limit: 5)
+    equal(history.map(\.id), [memo.id, dictation.id], "Sprachnachricht landet oben im Verlauf")
+
+    // Gleicher Text wie der vorige Diktat-Eintrag darf die Sprachnachricht nicht verschlucken.
+    let sameText = TranscriptHistoryEntry(
+        text: "Hallo Welt", type: .transcription, date: Date(),
+        voiceMessage: VoiceMessageReference(fileName: "a.m4a", sourcePath: "/tmp/a.m4a")
+    )
+    equal(TranscriptHistory.inserting(sameText, into: [dictation], limit: 5).count, 2,
+          "Sprachnachricht mit gleichem Text wie ein Diktat bleibt erhalten")
+    equal(TranscriptHistory.inserting(dictation, into: [dictation], limit: 5).count, 1,
+          "doppeltes Diktat direkt hintereinander wird zusammengefasst")
+
+    let full = (0..<5).map { TranscriptHistoryEntry(text: "t\($0)", type: .transcription, date: Date()) }
+    equal(TranscriptHistory.inserting(memo, into: full, limit: 5).count, 5, "Limit wird eingehalten")
+    equal(TranscriptHistory.inserting(memo, into: full, limit: 0).count, 0, "Limit 0 = Verlauf aus")
+
+    let encoded = try! JSONEncoder().encode([memo])
+    equal(try! JSONDecoder().decode([TranscriptHistoryEntry].self, from: encoded), [memo],
+          "Sprachnachricht-Eintrag übersteht Speichern und Laden")
+
+    // Verlaufsdatei aus älteren Versionen (ohne Sprachnachricht-Feld) muss weiter laden.
+    let legacy = Data("""
+    [{"id":"8E4C1C2A-7B7E-4C2B-9E3A-1D2F3A4B5C6D","text":"alt","type":"transcription","date":700000000}]
+    """.utf8)
+    let decoded = try? JSONDecoder().decode([TranscriptHistoryEntry].self, from: legacy)
+    equal(decoded?.first?.text, "alt", "alte Verlaufsdatei lädt weiter")
+    equal(decoded?.first?.tapAction, .copyText, "alter Eintrag bleibt ein Kopier-Eintrag")
+}
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")

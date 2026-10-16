@@ -674,7 +674,7 @@ struct CustomizeSettingsView: View {
 
                 Text(appState.appSettings.historyLimit == 0
                     ? "Verlauf ist aus. Ergebnisse werden nicht aufbewahrt."
-                    : "Rettet Text, der versehentlich ins falsche Feld ging. Tippen kopiert ihn zurück in die Zwischenablage. Bleibt als Klartext lokal auf dem Gerät (kein Server) — bei sensiblen Inhalten niedrig halten oder auf „Aus\u{201C}.")
+                    : "Rettet Text, der versehentlich ins falsche Feld ging. Tippen kopiert ihn zurück in die Zwischenablage, Sprachnachrichten öffnen wieder ihr Ergebnisfenster. Bleibt als Klartext lokal auf dem Gerät (kein Server) — bei sensiblen Inhalten niedrig halten oder auf „Aus\u{201C}.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

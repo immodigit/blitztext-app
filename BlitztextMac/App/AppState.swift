@@ -445,6 +445,14 @@ final class AppState {
                         }
                     }
                     succeeded += 1
+                    recordInHistory(
+                        result.text,
+                        type: appSettings.secureLocalModeEnabled ? .localTranscription : .transcription,
+                        voiceMessage: VoiceMessageReference(
+                            fileName: job.url.lastPathComponent,
+                            sourcePath: job.url.path
+                        )
+                    )
                     fileTranscriptionState = .done(
                         text: result.text,
                         fileName: job.url.lastPathComponent,
@@ -1051,21 +1059,20 @@ final class AppState {
     /// Legt ein Ergebnis oben in den Verlauf. Verhindert Verlust, wenn der Text
     /// ins falsche Feld gelandet ist. Doppelte direkt aufeinanderfolgende
     /// Ergebnisse werden zusammengefasst.
-    private func recordInHistory(_ text: String, type: WorkflowType?) {
+    private func recordInHistory(
+        _ text: String,
+        type: WorkflowType?,
+        voiceMessage: VoiceMessageReference? = nil
+    ) {
         let limit = appSettings.historyLimit
         guard limit > 0, let type else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        if transcriptHistory.first?.text == trimmed {
-            return
-        }
-
-        let entry = TranscriptHistoryEntry(text: trimmed, type: type, date: Date())
-        transcriptHistory.insert(entry, at: 0)
-        if transcriptHistory.count > limit {
-            transcriptHistory.removeLast(transcriptHistory.count - limit)
-        }
+        let entry = TranscriptHistoryEntry(text: trimmed, type: type, date: Date(), voiceMessage: voiceMessage)
+        let updated = TranscriptHistory.inserting(entry, into: transcriptHistory, limit: limit)
+        guard updated != transcriptHistory else { return }
+        transcriptHistory = updated
         saveHistory()
     }
 
@@ -1074,6 +1081,27 @@ final class AppState {
     func copyHistoryEntry(_ entry: TranscriptHistoryEntry) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(entry.text, forType: .string)
+    }
+
+    /// Öffnet eine Sprachnachricht aus „Zuletzt“ wieder im selben Ergebnisfenster
+    /// wie direkt nach dem Transkribieren — ohne erneut zu transkribieren.
+    func openVoiceMessageFromHistory(_ entry: TranscriptHistoryEntry) {
+        guard let voiceMessage = entry.voiceMessage else { return }
+        // Eine laufende Transkription nicht überschreiben — nur hinspringen.
+        if case .running = fileTranscriptionState {
+            page = .fileTranscription
+            return
+        }
+
+        // „Als .txt“ schreibt neben den Pfad des Originals bzw. nach Downloads —
+        // klappt also auch, wenn die Datei inzwischen verschoben wurde.
+        lastTranscriptionSourceURL = URL(fileURLWithPath: voiceMessage.sourcePath)
+        fileTranscriptionState = .done(
+            text: entry.text,
+            fileName: voiceMessage.fileName,
+            savedToFile: false
+        )
+        page = .fileTranscription
     }
 
     func deleteHistoryEntry(_ entry: TranscriptHistoryEntry) {
