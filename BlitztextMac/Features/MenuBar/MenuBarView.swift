@@ -865,19 +865,27 @@ struct HistorySection: View {
 
     private func row(for entry: TranscriptHistoryEntry) -> some View {
         let isCopied = copiedID == entry.id
+        let isVoiceMessage = entry.tapAction == .openVoiceMessage
         return Button {
-            appState.copyHistoryEntry(entry)
-            withAnimation(.easeInOut(duration: 0.2)) { copiedID = entry.id }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    if copiedID == entry.id { copiedID = nil }
+            switch entry.tapAction {
+            case .openVoiceMessage:
+                appState.openVoiceMessageFromHistory(entry)
+            case .copyText:
+                appState.copyHistoryEntry(entry)
+                withAnimation(.easeInOut(duration: 0.2)) { copiedID = entry.id }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if copiedID == entry.id { copiedID = nil }
+                    }
                 }
             }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: isCopied ? "checkmark" : entry.type.icon)
+                // Gleiches Symbol wie der Einstieg „Sprachnachricht transkribieren“,
+                // damit klar ist: Tippen öffnet das Fenster, statt zu kopieren.
+                Image(systemName: isCopied ? "checkmark" : (isVoiceMessage ? "waveform" : entry.type.icon))
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(isCopied ? Color.green : entry.type.color)
+                    .foregroundStyle(isCopied ? Color.green : (isVoiceMessage ? Color.blue : entry.type.color))
                     .frame(width: 16)
 
                 Text(entry.text)
@@ -892,6 +900,12 @@ struct HistorySection: View {
                     .font(.system(size: 9.5))
                     .foregroundStyle(isCopied ? Color.green : Color.secondary)
                     .fixedSize()
+
+                if isVoiceMessage {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
@@ -902,7 +916,7 @@ struct HistorySection: View {
             )
         }
         .buttonStyle(SubtleButtonStyle())
-        .help("Kopieren: \(entry.text)")
+        .help(entry.voiceMessage.map { "Sprachnachricht öffnen: \($0.fileName)" } ?? "Kopieren: \(entry.text)")
     }
 
     private func relativeTime(_ date: Date) -> String {

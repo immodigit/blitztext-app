@@ -124,24 +124,6 @@ struct AppSettings: Codable {
     }
 }
 
-// MARK: - Transcript History
-
-/// Ein aufbewahrtes Ergebnis, damit ein in das falsche Feld getippter Text
-/// nicht verloren geht. Bleibt rein lokal auf dem Gerät.
-struct TranscriptHistoryEntry: Codable, Identifiable, Equatable {
-    let id: UUID
-    let text: String
-    let type: WorkflowType
-    let date: Date
-
-    init(id: UUID = UUID(), text: String, type: WorkflowType, date: Date) {
-        self.id = id
-        self.text = text
-        self.type = type
-        self.date = date
-    }
-}
-
 enum TranscriptionBackend: String, Codable {
     case remote
     case local
