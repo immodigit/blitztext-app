@@ -178,6 +178,7 @@ The preview has no custom backend.
 Online transcription: Your Mac -> OpenAI Audio Transcriptions API
 Text rewriting:       Your Mac -> OpenAI Chat Completions API
 Local transcription:  Your Mac -> WhisperKit/CoreML on device
+Webhook (opt-in):     Your Mac -> your own webhook, e.g. n8n (see docs/webhook.md)
 ```
 
 The app stores your OpenAI API key in the user's macOS Keychain.

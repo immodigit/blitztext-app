@@ -440,6 +440,138 @@ do {
     equal(recorder.state, .idle, "reset räumt auf")
 }
 
+// MARK: - Webhook: Quellen und Einstellungen
+// Der Nutzer entscheidet pro Funktion, was an den Webhook (z. B. n8n) geht.
+// Standard: aus. Nach dem Einschalten zunächst nur Sprachnachrichten — Diktate
+// landen sonst bei jedem Satz in der Wissensdatenbank.
+
+equal(WebhookSource(workflow: .transcription), .dictation, "Diktat online zählt als Diktat")
+equal(WebhookSource(workflow: .localTranscription), .dictation, "Diktat lokal zählt als Diktat")
+equal(WebhookSource(workflow: .textImprover), .rewrite, "Blitztext+ zählt als Umformung")
+equal(WebhookSource(workflow: .dampfAblassen), .rewrite, "$%&! zählt als Umformung")
+equal(WebhookSource(workflow: .emojiText), .rewrite, "Emoji zählt als Umformung")
+
+do {
+    let settings = WebhookSettings.default
+    check(!settings.isEnabled, "Webhook ist ab Werk aus")
+    equal(settings.sources, [.voiceMessage], "ab Werk nur Sprachnachrichten vorgewählt")
+    check(!settings.sendsAutomatically(.voiceMessage), "ausgeschaltet wird nichts gesendet")
+
+    var on = settings
+    on.isEnabled = true
+    check(on.sendsAutomatically(.voiceMessage), "eingeschaltet gehen Sprachnachrichten raus")
+    check(!on.sendsAutomatically(.dictation), "Diktate nur, wenn ausdrücklich gewählt")
+    check(!on.sendsAutomatically(.rewrite), "Umformungen nur, wenn ausdrücklich gewählt")
+
+    on.sources = [.dictation]
+    check(!on.sendsAutomatically(.voiceMessage), "abgewählte Sprachnachrichten bleiben auf dem Mac")
+    check(on.sendsAutomatically(.dictation), "gewählte Diktate gehen raus")
+}
+
+do {
+    let custom = WebhookSettings(isEnabled: true, sources: [.voiceMessage, .rewrite])
+    let data = try! JSONEncoder().encode(custom)
+    equal(try! JSONDecoder().decode(WebhookSettings.self, from: data), custom, "Webhook-Einstellungen Roundtrip")
+
+    // Neuere Version kennt eine Quelle, die diese noch nicht kennt → überspringen statt crashen.
+    let future = Data(#"{"isEnabled":true,"sources":["voiceMessage","zeitreise"]}"#.utf8)
+    let decoded = try! JSONDecoder().decode(WebhookSettings.self, from: future)
+    equal(decoded.sources, [.voiceMessage], "unbekannte Quelle wird übersprungen")
+    check(decoded.isEnabled, "Schalter bleibt erhalten")
+
+    let empty = try! JSONDecoder().decode(WebhookSettings.self, from: Data("{}".utf8))
+    equal(empty, .default, "leere Einstellungen fallen auf den Standard zurück")
+}
+
+// MARK: - Webhook: Ziel-URL prüfen
+// Transkripte sind vertraulich: unverschlüsselt (http) nur an den eigenen Mac.
+
+equal(WebhookEndpoint.validate("https://n8n.example.de/webhook/abc"),
+      .success(URL(string: "https://n8n.example.de/webhook/abc")!), "https wird angenommen")
+equal(WebhookEndpoint.validate("  https://n8n.example.de/webhook/abc \n"),
+      .success(URL(string: "https://n8n.example.de/webhook/abc")!), "Leerzeichen beim Einfügen werden entfernt")
+equal(WebhookEndpoint.validate("http://localhost:5678/webhook/abc"),
+      .success(URL(string: "http://localhost:5678/webhook/abc")!), "http an localhost ist erlaubt")
+equal(WebhookEndpoint.validate("http://127.0.0.1:5678/webhook/abc"),
+      .success(URL(string: "http://127.0.0.1:5678/webhook/abc")!), "http an 127.0.0.1 ist erlaubt")
+equal(WebhookEndpoint.validate("http://n8n.example.de/webhook/abc"), .failure(.insecure),
+      "http über das Netz wird abgelehnt")
+equal(WebhookEndpoint.validate(""), .failure(.empty), "leere URL")
+equal(WebhookEndpoint.validate("n8n.example.de/webhook"), .failure(.malformed), "ohne Schema ungültig")
+equal(WebhookEndpoint.validate("ftp://n8n.example.de/x"), .failure(.malformed), "fremdes Schema ungültig")
+equal(WebhookEndpoint.validate("https://"), .failure(.malformed), "ohne Host ungültig")
+
+check(WebhookEndpoint.isN8nTestURL(URL(string: "https://n8n.example.de/webhook-test/abc")!),
+      "n8n-Test-URL wird erkannt")
+check(!WebhookEndpoint.isN8nTestURL(URL(string: "https://n8n.example.de/webhook/abc")!),
+      "Produktions-URL ist keine Test-URL")
+
+// MARK: - Webhook: Antwort des Servers verständlich machen
+
+check(WebhookResponse.problem(forStatus: 200) == nil, "200 ist Erfolg")
+check(WebhookResponse.problem(forStatus: 204) == nil, "204 ist Erfolg")
+check(WebhookResponse.problem(forStatus: 404)?.contains("aktiv") == true,
+      "404 erklärt, dass der Workflow vermutlich nicht aktiv ist")
+check(WebhookResponse.problem(forStatus: 403)?.contains("Token") == true, "403 verweist auf das Token")
+check(WebhookResponse.problem(forStatus: 401)?.contains("Token") == true, "401 verweist auf das Token")
+check(WebhookResponse.problem(forStatus: 500)?.contains("500") == true, "Serverfehler nennt den Status")
+
+// MARK: - Webhook: Nutzlast
+
+do {
+    let created = Date(timeIntervalSince1970: 1_792_000_000)
+    let recorded = Date(timeIntervalSince1970: 1_791_990_000)
+    let payload = WebhookPayload(
+        id: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,
+        source: .voiceMessage,
+        workflow: nil,
+        createdAt: created,
+        text: "Hallo Welt",
+        language: "de",
+        transcription: .local,
+        fileName: "Aufnahme 232.m4a",
+        recordedAt: recorded,
+        durationSeconds: 12.5,
+        segments: [SubtitleCue(start: 0, end: 1.5, text: "Hallo"), SubtitleCue(start: 1.5, end: 3, text: "Welt")],
+        appVersion: "1.8.0",
+        isTest: false
+    )
+    let json = try! JSONSerialization.jsonObject(with: payload.encodedJSON()) as! [String: Any]
+    equal(json["schema"] as? String, "blitztext.transcript.v1", "Schema-Version steht drin")
+    equal(json["id"] as? String, "11111111-2222-3333-4444-555555555555", "ID für Dubletten-Erkennung")
+    equal(json["source"] as? String, "voiceMessage", "Quelle maschinenlesbar")
+    equal(json["sourceLabel"] as? String, "Sprachnachricht", "Quelle lesbar")
+    equal(json["text"] as? String, "Hallo Welt", "Transkript")
+    equal(json["language"] as? String, "de", "Sprache")
+    equal(json["transcription"] as? String, "local", "Transkriptionsweg")
+    equal(json["fileName"] as? String, "Aufnahme 232.m4a", "Dateiname")
+    equal(json["createdAt"] as? String, "2026-10-14T17:46:40Z", "Zeitpunkt ISO 8601 in UTC")
+    equal(json["recordedAt"] as? String, "2026-10-14T15:00:00Z", "Aufnahmezeit ISO 8601")
+    equal(json["durationSeconds"] as? Double, 12.5, "Dauer")
+    equal(json["isTest"] as? Bool, false, "kein Testlauf")
+    equal((json["app"] as? [String: String])?["version"], "1.8.0", "App-Version")
+    let segments = json["segments"] as? [[String: Any]]
+    equal(segments?.count, 2, "Segmente mit Zeitstempeln")
+    equal(segments?.first?["text"] as? String, "Hallo", "Segmenttext")
+    equal(segments?.last?["start"] as? Double, 1.5, "Segmentbeginn")
+    check(json["workflow"] == nil, "fehlende Felder werden weggelassen statt leer gesendet")
+}
+
+do {
+    let payload = WebhookPayload(
+        id: UUID(), source: .dictation, workflow: .localTranscription, createdAt: Date(),
+        text: "kurz", language: "de", transcription: .local, fileName: nil, recordedAt: nil,
+        durationSeconds: nil, segments: [], appVersion: "1.8.0", isTest: false
+    )
+    let json = try! JSONSerialization.jsonObject(with: payload.encodedJSON()) as! [String: Any]
+    equal(json["workflow"] as? String, "localTranscription", "auslösender Workflow bei Diktaten")
+    equal(json["sourceLabel"] as? String, "Diktat", "Diktat lesbar")
+    check(json["segments"] == nil, "leere Segmentliste wird weggelassen")
+    check(json["fileName"] == nil, "ohne Datei kein Dateiname")
+}
+
+check(WebhookPayload.test(appVersion: "1.8.0").isTest, "Testnachricht ist als Test markiert")
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")

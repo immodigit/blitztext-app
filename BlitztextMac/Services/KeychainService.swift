@@ -3,10 +3,14 @@ import Security
 
 enum KeychainKey: String, CaseIterable, Codable {
     case openAIAPIKey = "openAIAPIKey"
+    case webhookURL = "webhookURL"
+    case webhookToken = "webhookToken"
 
     var label: String {
         switch self {
         case .openAIAPIKey: return "OpenAI API Key"
+        case .webhookURL: return "Webhook-URL"
+        case .webhookToken: return "Webhook-Token"
         }
     }
 }

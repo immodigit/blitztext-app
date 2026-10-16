@@ -1368,6 +1368,78 @@ struct FileTranscriptionContentView: View {
                 .foregroundStyle(.secondary)
                 .buttonStyle(SubtleButtonStyle())
             }
+
+            if appState.webhookSettings.isEnabled,
+               appState.lastVoiceMessagePayload != nil || appState.fileWebhookState != .idle {
+                WebhookDeliveryRow(
+                    state: appState.fileWebhookState,
+                    canSend: appState.lastVoiceMessagePayload != nil,
+                    send: appState.sendVoiceMessageToWebhook
+                )
+            }
+        }
+    }
+}
+
+/// Übergabe der Sprachnachricht an den Webhook: Knopf, Fortschritt oder Ergebnis.
+private struct WebhookDeliveryRow: View {
+    let state: WebhookDeliveryState
+    let canSend: Bool
+    let send: () -> Void
+
+    var body: some View {
+        switch state {
+        case .idle:
+            if canSend {
+                Button(action: send) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "paperplane")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("An Webhook senden")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.blue)
+                }
+                .buttonStyle(SubtleButtonStyle())
+            }
+
+        case .sending:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Wird an den Webhook gesendet …")
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(.secondary)
+
+        case .sent:
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 10, weight: .bold))
+                Text("An den Webhook übergeben")
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.green)
+
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    Text(message)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if canSend {
+                    Button("Erneut senden", action: send)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.blue)
+                        .buttonStyle(SubtleButtonStyle())
+                }
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.09)))
         }
     }
 }

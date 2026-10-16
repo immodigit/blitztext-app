@@ -44,7 +44,7 @@ struct SettingsContentView: View {
 
 // MARK: - Section Label (quiet style)
 
-private struct SectionLabel: View {
+struct SectionLabel: View {
     let text: String
 
     var body: some View {
@@ -687,6 +687,9 @@ struct CustomizeSettingsView: View {
                     .font(.system(size: 11))
                 }
             }
+
+            // MARK: Webhook
+            WebhookSettingsSection(appState: appState)
 
             // MARK: Blitztext+
             VStack(alignment: .leading, spacing: 10) {
