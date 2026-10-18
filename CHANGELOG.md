@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.0](https://github.com/immodigit/blitztext-app/compare/v1.7.1...v1.8.0) (2026-10-18)
+
+
+### Features
+
+* **ui:** Menüleiste zeigt laufende Sprachnachricht-Transkription ([a01d6ad](https://github.com/immodigit/blitztext-app/commit/a01d6adf7839eb08a367f49eb88659c8d61889b5))
+* **verlauf:** Sprachnachrichten in „Zuletzt“ öffnen wieder ihr Ergebnisfenster ([384302b](https://github.com/immodigit/blitztext-app/commit/384302bb07dfd94e8770caebd3db14d0e54331b6))
+
 ## [1.7.1](https://github.com/immodigit/blitztext-app/compare/v1.7.0...v1.7.1) (2026-08-26)
 
 
