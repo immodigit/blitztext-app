@@ -16,15 +16,15 @@ extension WorkflowType {
 }
 
 struct WorkflowRowView: View {
-    enum DataMode { case local, cloud }
-
     let type: WorkflowType
     let enabled: Bool
     var customName: String? = nil
     /// Nur gesetzt, wenn es etwas zu sagen gibt (z. B. warum die Zeile
     /// deaktiviert ist). Im Normalfall bleibt die Zeile bewusst ruhig.
     var subtitle: String? = nil
-    var dataMode: DataMode? = nil
+    /// Markiert, dass dieser Modus Text ins Netz schickt, obwohl der Rest
+    /// lokal läuft. Nur die Abweichung wird gezeigt, nicht der Normalfall.
+    var sendsOnline: Bool = false
     /// Beschriftung des Kürzels. Nil, wenn der Workflow unbelegt ist —
     /// dann bleibt der Badge weg statt eine tote Taste zu versprechen.
     var hotkeyLabel: String? = nil
@@ -34,38 +34,38 @@ struct WorkflowRowView: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 // Icon in der Workflow-Farbe — gleiche Farbe wie im Status-HUD,
                 // damit der Nutzer Aktion und Overlay sofort zuordnet.
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(type.color.opacity(enabled ? (isHovered ? 0.22 : 0.13) : 0.06))
-                        .frame(width: 36, height: 36)
-
-                    Image(systemName: type.icon)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(enabled ? AnyShapeStyle(type.color) : AnyShapeStyle(.tertiary))
-                }
+                ModeIcon(icon: type.icon, tint: type.color, size: 34)
+                    .opacity(enabled ? 1 : 0.45)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(customName ?? type.displayName)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(enabled ? .primary : .tertiary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(customName ?? type.displayName)
+                            .font(.ui(13.5, .semibold))
+                            .foregroundStyle(enabled ? .primary : .tertiary)
+                            .lineLimit(1)
+
+                        if sendsOnline {
+                            Image(systemName: "icloud")
+                                .font(.ui(10, .semibold))
+                                .foregroundStyle(BlitztextTheme.warning)
+                                .help("Dieser Modus sendet den Text an OpenAI.")
+                                .accessibilityLabel("sendet online")
+                        }
+                    }
 
                     if let subtitle {
                         Text(subtitle)
-                            .font(.system(size: 11))
-                            .foregroundStyle(enabled ? .secondary : .quaternary)
+                            .font(.ui(11.5))
+                            .foregroundStyle(enabled ? .secondary : .tertiary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
 
-                Spacer()
-
-                if let dataMode {
-                    DataModeBadge(mode: dataMode, enabled: enabled)
-                }
+                Spacer(minLength: 6)
 
                 if let hotkeyLabel {
                     HotkeyBadge(label: hotkeyLabel, enabled: enabled)
@@ -73,46 +73,22 @@ struct WorkflowRowView: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(isHovered && enabled ? Color.primary.opacity(0.05) : Color.clear)
             )
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.5)
+        .help("Startet \(customName ?? type.displayName)")
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovered = hovering
             }
         }
-    }
-
-}
-
-// MARK: - Data Mode Badge (Lokal / Cloud)
-
-struct DataModeBadge: View {
-    let mode: WorkflowRowView.DataMode
-    let enabled: Bool
-
-    var body: some View {
-        let isLocal = mode == .local
-        let color: Color = isLocal ? .green : .orange
-        return HStack(spacing: 2) {
-            Image(systemName: isLocal ? "lock.fill" : "icloud.fill")
-            Text(isLocal ? "Lokal" : "Cloud")
-        }
-        .font(.system(size: 8.5, weight: .bold))
-        .foregroundStyle(enabled ? AnyShapeStyle(color) : AnyShapeStyle(.quaternary))
-        .padding(.horizontal, 5)
-        .padding(.vertical, 1.5)
-        .background(
-            Capsule().fill((enabled ? color : Color.gray).opacity(0.12))
-        )
     }
 }
 
