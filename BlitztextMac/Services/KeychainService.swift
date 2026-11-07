@@ -44,6 +44,10 @@ enum KeychainService {
     }
 
     static func load(key: KeychainKey) -> String? {
+        #if DEBUG
+        // Bildschirmfoto-Modus: nie den Schlüsselbund anfragen (würde einen Dialog öffnen).
+        if DebugSnapshots.folder != nil { return nil }
+        #endif
         var query = baseQuery(for: key)
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         query[kSecReturnData as String] = true

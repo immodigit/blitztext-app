@@ -4,9 +4,12 @@ import BlitztextCore
 struct MenuBarView: View {
     @Bindable var appState: AppState
 
+    static let width: CGFloat = 380
+
     /// Damit die Versionszeile beim Überfahren erkennbar wird — sonst sieht
     /// niemand, dass sie anklickbar ist.
     @State private var isVersionHovered = false
+    @State private var copiedLast = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,303 +26,168 @@ struct MenuBarView: View {
                 fileTranscriptionPage
             case .improverTextBox:
                 improverTextBoxPage
+            case .history:
+                historyPage
             }
         }
-        .frame(width: 340)
+        .frame(width: Self.width)
+        .background(BlitztextTheme.page)
+        .tint(BlitztextTheme.accent)
         .animation(.easeInOut(duration: 0.2), value: appState.page)
     }
 
     // MARK: - Main Page
 
+    /// Aufbau von oben nach unten: Marke, Hinweise nur wenn nötig, die eine
+    /// Kern-Geste (Diktat), die Modi als ruhige Liste, das letzte Ergebnis.
+    /// Technik (Modell, Schlüssel, Kürzel) wohnt in den Einstellungen.
     private var mainPage: some View {
         VStack(spacing: 0) {
-            // Header
-            VStack(spacing: 0) {
-                // Top bar
-                HStack {
-                    Text("Blitztext")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    Button {
-                        appState.page = .settings
-                    } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "gear")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.tertiary)
-                                .frame(width: 28, height: 28)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.primary.opacity(0.00001)) // hit target
-                                )
-                                .contentShape(Rectangle())
-
-                            if !appState.accessibilityPermissionGranted {
-                                Circle()
-                                    .fill(Color.orange)
-                                    .frame(width: 6, height: 6)
-                                    .offset(x: -4, y: 4)
-                            }
-                        }
-                    }
-                    .buttonStyle(SubtleButtonStyle())
-                }
+            miniHeader
                 .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
 
-                // Status area
+            VStack(alignment: .leading, spacing: 14) {
+                if !appState.isConfigured {
+                    setupHero
+                }
+
+                if BlitztextInstallLocationService.shouldOfferMoveToApplications {
+                    NoticeRow(
+                        icon: "externaldrive.badge.plus",
+                        title: "Nach /Applications verschieben",
+                        detail: "So startet Blitztext zuverl\u{00E4}ssig mit dem Mac und bekommt saubere Updates.",
+                        tint: BlitztextTheme.warning,
+                        actionTitle: "Pr\u{00FC}fen",
+                        action: { appState.page = .settings }
+                    )
+                }
+
+                if !appState.accessibilityPermissionGranted {
+                    NoticeRow(
+                        icon: "hand.raised.fill",
+                        title: "Einf\u{00FC}gen braucht Bedienungshilfen",
+                        detail: "Nach Updates kann macOS die Freigabe neu verlangen.",
+                        actionTitle: "\u{00D6}ffnen",
+                        action: { appState.requestAccessibilityPermission() }
+                    )
+                }
+
                 if appState.isConfigured {
-                    configuredHeader
-                } else {
-                    unconfiguredHeader
+                    dictationCard
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionHeader(title: "Modi")
+                    modeList
+                        .card()
+                }
+
+                if appState.appSettings.historyLimit > 0, let entry = appState.transcriptHistory.first {
+                    lastMessage(entry)
                 }
             }
+            .padding(.horizontal, 16)
             .padding(.bottom, 16)
-            .background(
-                Color(nsColor: .controlBackgroundColor).opacity(0.5)
-            )
-
-            if BlitztextInstallLocationService.shouldOfferMoveToApplications {
-                installHintBanner
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 2)
-            }
-
-            // Die Aktionen kommen zuerst — Konfiguration rückt nach unten
-            // bzw. in die Einstellungen.
-            VStack(spacing: 0) {
-                ForEach(WorkflowType.mainMenuCases) { type in
-                    let enabled = isImprover(type)
-                        ? appState.improverBoxAvailable
-                        : appState.isWorkflowAvailable(type)
-                    WorkflowRowView(
-                        type: type,
-                        enabled: enabled,
-                        customName: appState.displayName(for: type),
-                        // Untertitel nur, wenn es ein Problem zu erklären gibt —
-                        // im Normalzustand bleiben die Zeilen ruhig.
-                        subtitle: enabled ? nil : appState.workflowSubtitle(for: type),
-                        dataMode: rowDataMode(for: type),
-                        hotkeyLabel: appState.hotkeyLabel(for: type)
-                    ) {
-                        if isImprover(type) {
-                            appState.openImproverBox(type: type)
-                        } else {
-                            appState.startWorkflow(type)
-                        }
-                    }
-                }
-            }
-            .padding(.top, 6)
-            .padding(.bottom, 2)
-
-            if !appState.accessibilityPermissionGranted {
-                accessibilityHintBanner
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
-            }
-
-            transcriptionModeRow
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-
-            if appState.isConfigured {
-                fileTranscriptionEntry
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
-            }
-
-            if appState.appSettings.historyLimit > 0 && !appState.transcriptHistory.isEmpty {
-                HistorySection(appState: appState)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-            }
 
             appFooter
-                .padding(.top, 2)
         }
     }
 
-    /// Bewusst schlank: eine Zeile statt Karte — die Funktion ist sekundär
-    /// gegenüber den Diktier-Workflows.
-    private var fileTranscriptionEntry: some View {
-        Button {
-            appState.presentFileTranscription()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "waveform.badge.plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.blue)
-                    .frame(width: 20)
+    private var miniHeader: some View {
+        HStack(alignment: .center, spacing: 9) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 26, height: 26)
+                .accessibilityHidden(true)
 
-                Text("Sprachnachricht transkribieren")
-                    .font(.system(size: 11.5, weight: .medium))
+            Text("Blitztext")
+                .font(.ui(15, .bold))
+
+            Spacer(minLength: 0)
+
+            Button {
+                appState.page = .settings
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.ui(13))
                     .foregroundStyle(.primary)
-
-                Spacer(minLength: 4)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(BlitztextTheme.card))
+                    .shadow(color: BlitztextTheme.cardShadow, radius: 2, y: 1)
+                    .contentShape(Circle())
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.primary.opacity(0.035))
-            )
+            .buttonStyle(.plain)
+            .keyboardShortcut(",", modifiers: .command)
+            .help("Einstellungen")
+            .accessibilityLabel("Einstellungen")
         }
-        .buttonStyle(SubtleButtonStyle())
     }
 
-    // MARK: - File Transcription Page
+    private var setupHero: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Einrichtung n\u{00F6}tig")
+                .font(.ui(16, .bold))
+            Text("Lade ein lokales Sprachmodell oder hinterlege deinen OpenAI API Key. Danach sprechen und einf\u{00FC}gen.")
+                .font(.ui(12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                appState.page = .settings
+            } label: {
+                Label("Einrichten", systemImage: "checklist")
+            }
+            .buttonStyle(.filledAction)
+            .padding(.top, 2)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
 
-    private var fileTranscriptionPage: some View {
-        VStack(spacing: 0) {
-            HStack {
+    // MARK: Diktat
+
+    /// Der Diktat-Workflow, den das Hauptkürzel gerade auslöst.
+    private var dictationType: WorkflowType { .transcription }
+
+    /// Die Kern-Geste in einem Satz, dazu wo transkribiert wird.
+    private var dictationCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
                 Button {
-                    appState.resetFileTranscription()
+                    appState.startWorkflow(dictationType)
                 } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Zur\u{00FC}ck")
-                            .font(.system(size: 12))
-                    }
-                    .foregroundStyle(.secondary)
+                    Image(systemName: "mic.fill")
+                        .font(.ui(20, .semibold))
+                        .foregroundStyle(BlitztextTheme.onAccent)
+                        .frame(width: 52, height: 52)
+                        .background(SpeechBubbleShape().fill(BlitztextTheme.accent))
+                        .contentShape(Circle())
                 }
-                .buttonStyle(SubtleButtonStyle())
+                .buttonStyle(.plain)
+                .disabled(!appState.isWorkflowAvailable(dictationType))
+                .help("Diktat jetzt starten")
+                .accessibilityLabel("Aufnahme starten")
 
-                Spacer()
-
-                HStack(spacing: 5) {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.blue)
-                    Text("Sprachnachricht")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(dictationTitle)
+                        .font(.ui(14, .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Der Text landet direkt am Cursor.")
+                        .font(.ui(11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer()
-                Color.clear.frame(width: 58, height: 18)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
 
-            Divider()
-
-            FileTranscriptionContentView(appState: appState)
-
-            Spacer(minLength: 0)
-
-            appFooter
-        }
-    }
-
-    private var improverTextBoxPage: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button {
-                    appState.resetImproverBox()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Zur\u{00FC}ck")
-                            .font(.system(size: 12))
-                    }
+            HStack(spacing: 8) {
+                Text("Lokal auf diesem Mac")
+                    .font(.ui(12))
                     .foregroundStyle(.secondary)
-                }
-                .buttonStyle(SubtleButtonStyle())
-
-                Spacer()
-
-                HStack(spacing: 5) {
-                    Image(systemName: appState.improverType.icon)
-                        .font(.system(size: 11))
-                        .foregroundStyle(appState.improverType.color)
-                    Text(appState.displayName(for: appState.improverType))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.primary)
-                }
-
-                Spacer()
-                Color.clear.frame(width: 58, height: 18)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            Divider()
-
-            ImproverTextBoxContent(appState: appState)
-
-            Spacer(minLength: 0)
-
-            appFooter
-        }
-    }
-
-    private func isImprover(_ type: WorkflowType) -> Bool {
-        type == .textImprover || type == .dampfAblassen || type == .emojiText
-    }
-
-    private func rowDataMode(for type: WorkflowType) -> WorkflowRowView.DataMode {
-        switch type {
-        case .textImprover, .dampfAblassen, .emojiText:
-            return appState.improverRewriteIsLocal ? .local : .cloud
-        case .localTranscription:
-            return .local
-        case .transcription:
-            return appState.appSettings.secureLocalModeEnabled ? .local : .cloud
-        }
-    }
-
-    /// Kompakte Modus-Zeile: zeigt, WO transkribiert wird, und schaltet um.
-    /// Modell-Auswahl und Download wohnen in den Einstellungen — hier gibt es
-    /// nur den Status und einen direkten Absprung dorthin.
-    private var transcriptionModeRow: some View {
-        let localOn = appState.appSettings.secureLocalModeEnabled
-
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: localOn ? "lock.shield.fill" : "network")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(localOn ? .green : .blue)
-                    .frame(width: 22, height: 22)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(localOn ? "Transkription: lokal auf dem Gerät" : "Transkription: online (OpenAI)")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(.primary)
-
-                    if localOn {
-                        Button {
-                            appState.page = .settings
-                        } label: {
-                            HStack(spacing: 3) {
-                                if !appState.selectedLocalModelIsInstalled && !appState.isDownloadingLocalModel {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .font(.system(size: 8.5))
-                                        .foregroundStyle(.orange)
-                                }
-                                Text(modeRowDetail)
-                                    .font(.system(size: 10.5))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Modell in den Einstellungen verwalten")
-                    }
-                }
 
                 Spacer(minLength: 4)
 
@@ -342,236 +210,248 @@ struct MenuBarView: View {
             if let progress = appState.localModelDownloadProgress {
                 VStack(alignment: .leading, spacing: 4) {
                     ProgressView(value: progress)
-                    Text(appState.localModelDownloadStatusText ?? "Modell wird geladen ...")
-                        .font(.system(size: 10.5))
+                    Text(appState.localModelDownloadStatusText ?? "Modell wird geladen \u{2026}")
+                        .font(.ui(11))
                         .foregroundStyle(.secondary)
                 }
             }
 
             if let errorText = appState.localModelDownloadErrorText {
-                Text(errorText)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+                NoticeRow(icon: "xmark.circle.fill", title: errorText, tint: BlitztextTheme.danger)
             }
+
+            Button {
+                appState.page = .settings
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: statusIcon)
+                        .font(.ui(10.5, .semibold))
+                        .foregroundStyle(statusTint)
+                        .padding(.top, 1.5)
+                    Text(statusText)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.ui(11.5))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Modell und Zugang in den Einstellungen verwalten")
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.primary.opacity(0.035))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-        )
+        .padding(16)
+        .card()
     }
 
-    private var modeRowDetail: String {
+    private var dictationTitle: String {
+        guard let hotkey = appState.hotkeyLabel(for: dictationType) else {
+            return "Mikrofon antippen und sprechen"
+        }
+        switch appState.appSettings.hotkeyMode {
+        case .hold: return "\(hotkey) halten und sprechen"
+        case .toggle: return "\(hotkey) dr\u{00FC}cken und sprechen"
+        }
+    }
+
+    private var statusNeedsAttention: Bool {
+        appState.appSettings.secureLocalModeEnabled
+            && !appState.selectedLocalModelIsInstalled
+            && !appState.isDownloadingLocalModel
+    }
+
+    private var statusIcon: String {
+        if statusNeedsAttention { return "exclamationmark.triangle.fill" }
+        return appState.appSettings.secureLocalModeEnabled ? "lock.fill" : "network"
+    }
+
+    private var statusTint: Color {
+        if statusNeedsAttention { return BlitztextTheme.warning }
+        return appState.appSettings.secureLocalModeEnabled ? BlitztextTheme.ready : BlitztextTheme.accent
+    }
+
+    /// Ehrlicher Geltungsbereich: was bleibt auf dem Mac, was geht raus?
+    private var statusText: String {
+        guard appState.appSettings.secureLocalModeEnabled else {
+            return "Sprache und Modi laufen online \u{00FC}ber OpenAI."
+        }
         if appState.isDownloadingLocalModel {
-            return appState.localModelDownloadStatusText ?? "Modell wird geladen ..."
+            return appState.localModelDownloadStatusText ?? "Modell wird geladen \u{2026}"
         }
         if !appState.selectedLocalModelIsInstalled {
-            return "Modell fehlt — in den Einstellungen laden"
+            return "\(appState.selectedLocalModelDisplayName) fehlt noch. In den Einstellungen laden."
         }
-        // Ehrlicher Geltungsbereich: was bleibt lokal, was geht raus?
         if appState.improverRewriteIsLocal {
-            return "\(appState.selectedLocalModelDisplayName) · alles bleibt auf dem Gerät"
+            return "\(appState.selectedLocalModelDisplayName). Sprache und Modi bleiben auf diesem Mac."
         }
         if appState.improverBoxAvailable {
-            return "\(appState.selectedLocalModelDisplayName) · Umformer senden an OpenAI"
+            return "\(appState.selectedLocalModelDisplayName). Sprache bleibt auf diesem Mac, Modi senden an OpenAI."
         }
-        return appState.selectedLocalModelDisplayName
+        return "\(appState.selectedLocalModelDisplayName). Sprache bleibt auf diesem Mac."
     }
 
-    private var accessibilityHintBanner: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "hand.raised.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.orange)
-                .frame(width: 18, height: 18)
+    // MARK: Modi
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Einfügen braucht Bedienungshilfen.")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.primary)
-
-                Text("Nach Updates kann macOS die Freigabe neu verlangen.")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-
-            Button("Öffnen") {
-                appState.requestAccessibilityPermission()
-            }
-            .font(.system(size: 10.5, weight: .medium))
-            .buttonStyle(SubtleButtonStyle())
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.orange.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.orange.opacity(0.12), lineWidth: 0.5)
-        )
+    /// Der Diktat-Workflow steht schon groß oben; die Liste zeigt die Umformer.
+    private var listedModes: [WorkflowType] {
+        WorkflowType.mainMenuCases.filter { $0 != dictationType }
     }
 
-    private var configuredHeader: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(.green)
-                    .frame(width: 7, height: 7)
-                Text("Bereit")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-
-            // Die Kern-Geste in einem Satz — sichtbar, ohne Handbuch.
-            Text(usageHint)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 28)
-        }
-    }
-
-    private var usageHint: String {
-        switch appState.appSettings.hotkeyMode {
-        case .hold:
-            return "Kürzel halten, sprechen, loslassen — der Text landet im aktiven Textfeld."
-        case .toggle:
-            return "Kürzel drücken, sprechen, nochmal drücken — der Text landet im aktiven Textfeld."
-        }
-    }
-
-    private var installHintBanner: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "externaldrive.badge.plus")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.orange)
-                .frame(width: 18, height: 18)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Für sauberen Anmeldestart nach /Applications verschieben.")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.primary)
-
-                Text("Sonst entstehen leichter doppelte Login-Items oder uneinheitliche Updates.")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-
-            Button("Prüfen") {
-                appState.page = .settings
-            }
-            .font(.system(size: 10.5, weight: .medium))
-            .buttonStyle(SubtleButtonStyle())
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.orange.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.orange.opacity(0.12), lineWidth: 0.5)
-        )
-    }
-
-    private var onboardingPage: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Willkommen bei Blitztext")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                Button("Später") {
-                    appState.page = .main
+    private var modeList: some View {
+        let modes = listedModes
+        return VStack(spacing: 0) {
+            ForEach(Array(modes.enumerated()), id: \.element) { index, type in
+                if index > 0 {
+                    Divider().opacity(0.5).padding(.leading, 62).padding(.trailing, 12)
                 }
-                .font(.system(size: 11, weight: .medium))
-                .buttonStyle(SubtleButtonStyle())
-                .foregroundStyle(.secondary)
+                let enabled = isImprover(type)
+                    ? appState.improverBoxAvailable
+                    : appState.isWorkflowAvailable(type)
+                WorkflowRowView(
+                    type: type,
+                    enabled: enabled,
+                    customName: appState.displayName(for: type),
+                    // Untertitel nur, wenn es ein Problem zu erklären gibt —
+                    // im Normalzustand bleiben die Zeilen ruhig.
+                    subtitle: enabled ? nil : appState.workflowSubtitle(for: type),
+                    sendsOnline: enabled && rowSendsOnline(type),
+                    hotkeyLabel: appState.hotkeyLabel(for: type)
+                ) {
+                    if isImprover(type) {
+                        appState.openImproverBox(type: type)
+                    } else {
+                        appState.startWorkflow(type)
+                    }
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-            .background(
-                Color(nsColor: .controlBackgroundColor).opacity(0.5)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func isImprover(_ type: WorkflowType) -> Bool {
+        type == .textImprover || type == .dampfAblassen || type == .emojiText
+    }
+
+    /// Nur Abweichungen markieren: Im lokalen Modus fällt auf, wenn ein Modus
+    /// doch ins Netz geht. Im Online-Modus gilt das ohnehin für alles.
+    private func rowSendsOnline(_ type: WorkflowType) -> Bool {
+        guard appState.appSettings.secureLocalModeEnabled else { return false }
+        switch type {
+        case .textImprover, .dampfAblassen, .emojiText:
+            return !appState.improverRewriteIsLocal
+        case .transcription, .localTranscription:
+            return false
+        }
+    }
+
+    // MARK: Letztes Ergebnis
+
+    /// Das letzte Ergebnis als gesendete Nachricht. Ein Klick kopiert es,
+    /// eine Sprachnachricht öffnet ihr Ergebnisfenster.
+    private func lastMessage(_ entry: TranscriptHistoryEntry) -> some View {
+        let isVoiceMessage = entry.tapAction == .openVoiceMessage
+        return VStack(alignment: .trailing, spacing: 5) {
+            Button {
+                switch entry.tapAction {
+                case .openVoiceMessage:
+                    appState.openVoiceMessageFromHistory(entry)
+                case .copyText:
+                    appState.copyHistoryEntry(entry)
+                    withAnimation(.easeOut(duration: 0.15)) { copiedLast = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                        withAnimation(.easeOut(duration: 0.15)) { copiedLast = false }
+                    }
+                }
+            } label: {
+                Text(entry.text)
+                    .font(.ui(12.5))
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 16, bottomLeadingRadius: 16,
+                            bottomTrailingRadius: 4, topTrailingRadius: 16,
+                            style: .continuous
+                        )
+                        .fill(BlitztextTheme.accent.opacity(0.12))
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(isVoiceMessage ? "Sprachnachricht \u{00F6}ffnen" : "Kopieren")
+            .accessibilityLabel("Letzter Text: \(entry.text)")
+
+            Group {
+                if copiedLast {
+                    Label("Kopiert", systemImage: "checkmark")
+                        .foregroundStyle(BlitztextTheme.ready)
+                } else {
+                    Label(
+                        "\(isVoiceMessage ? "Sprachnachricht" : appState.displayName(for: entry.type)), \(Self.relativeTime(entry.date))",
+                        systemImage: isVoiceMessage ? "waveform" : "doc.on.doc"
+                    )
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .font(.ui(11))
+            .padding(.trailing, 6)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.leading, 40)
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "de_DE")
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
+    static func relativeTime(_ date: Date) -> String {
+        if Date().timeIntervalSince(date) < 60 { return "gerade eben" }
+        return relativeFormatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    // MARK: - History Page
+
+    private var historyPage: some View {
+        VStack(spacing: 0) {
+            PageHeader(title: "Verlauf", onBack: { appState.page = .main }) {
+                if !appState.transcriptHistory.isEmpty {
+                    Button("Leeren") {
+                        appState.clearHistory()
+                        appState.page = .main
+                    }
+                    .font(.ui(12))
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(SubtleButtonStyle())
+                }
+            }
+
+            ScrollView {
+                HistorySection(appState: appState)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            }
+            .frame(maxHeight: 460)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - File Transcription Page
+
+    private var fileTranscriptionPage: some View {
+        VStack(spacing: 0) {
+            PageHeader(
+                title: "Sprachnachricht",
+                icon: "waveform",
+                iconTint: BlitztextTheme.accent,
+                onBack: { appState.resetFileTranscription() }
             )
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.blue.opacity(0.1))
-                            .frame(width: 42, height: 42)
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.blue)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Einmal einrichten, dann direkt loslegen.")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text("Eigenen OpenAI API Key eintragen. Danach sprechen und einfügen.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    if BlitztextInstallLocationService.shouldOfferMoveToApplications {
-                        onboardingInstallCard
-                    }
-
-                    onboardingStep(number: "1", title: "OpenAI Key speichern", detail: "Öffne die Einstellungen und trage deinen eigenen OpenAI API Key ein.")
-                    onboardingStep(number: "2", title: "Berechtigungen erlauben", detail: "Mikrofon und Bedienungshilfen für das Einfügen freigeben.")
-                    onboardingStep(number: "3", title: "Workflow wählen", detail: "Blitztext oder einen der Verbesserer-Workflows direkt aus der Menüleiste starten.")
-                }
-
-                HStack(spacing: 8) {
-                    Button {
-                        appState.page = .settings
-                    } label: {
-                        Text("Jetzt einrichten")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 7)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.primary.opacity(0.06))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                            )
-                    }
-                    .buttonStyle(SubtleButtonStyle())
-
-                    Text("Du findest alles später im Zahnrad.")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            FileTranscriptionContentView(appState: appState)
 
             Spacer(minLength: 0)
 
@@ -579,135 +459,116 @@ struct MenuBarView: View {
         }
     }
 
-    private var unconfiguredHeader: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.orange.opacity(0.1))
-                    .frame(width: 40, height: 40)
-                Image(systemName: "key.fill")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.orange)
+    private var improverTextBoxPage: some View {
+        VStack(spacing: 0) {
+            PageHeader(
+                title: appState.displayName(for: appState.improverType),
+                icon: appState.improverType.icon,
+                iconTint: appState.improverType.color,
+                onBack: { appState.resetImproverBox() }
+            )
+
+            ImproverTextBoxContent(appState: appState)
+
+            Spacer(minLength: 0)
+
+            appFooter
+        }
+    }
+
+    // MARK: - Onboarding
+
+    private var onboardingPage: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Willkommen bei Blitztext")
+                    .font(.ui(14, .semibold))
+
+                Spacer()
+
+                Button("Sp\u{00E4}ter") {
+                    appState.page = .main
+                }
+                .font(.ui(12))
+                .foregroundStyle(.secondary)
+                .buttonStyle(SubtleButtonStyle())
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
 
-            VStack(spacing: 4) {
-                Text("Einrichtung n\u{00F6}tig")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Einmal einrichten, dann direkt loslegen.")
+                        .font(.ui(14, .semibold))
+                    Text("Lokales Sprachmodell laden oder eigenen OpenAI API Key eintragen. Danach sprechen und einf\u{00FC}gen.")
+                        .font(.ui(12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                Text("\u{00D6}ffne die Einstellungen und hinterlege deine Zugangsdaten, um loszulegen.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 20)
-            }
-
-            Button {
-                appState.page = .settings
-            } label: {
-                Text("Einstellungen \u{00F6}ffnen")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.primary.opacity(0.06))
+                if BlitztextInstallLocationService.shouldOfferMoveToApplications {
+                    NoticeRow(
+                        icon: "arrow.down.app",
+                        title: "Lege Blitztext zuerst nach /Applications.",
+                        detail: "Das h\u{00E4}lt Anmeldestart, Updates und das Entfernen sauber auf einer App-Kopie.",
+                        tint: BlitztextTheme.warning
                     )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                    )
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    onboardingStep(number: "1", title: "Sprachmodell oder Key", detail: "In den Einstellungen ein lokales Modell laden oder deinen OpenAI API Key speichern.")
+                    onboardingStep(number: "2", title: "Berechtigungen erlauben", detail: "Mikrofon und Bedienungshilfen f\u{00FC}r das Einf\u{00FC}gen freigeben.")
+                    onboardingStep(number: "3", title: "Kürzel halten und sprechen", detail: "Der Text landet direkt im aktiven Textfeld.")
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .card()
+
+                Button {
+                    appState.page = .settings
+                } label: {
+                    Label("Jetzt einrichten", systemImage: "checklist")
+                }
+                .buttonStyle(.filledAction)
             }
-            .buttonStyle(SubtleButtonStyle())
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+
+            Spacer(minLength: 0)
+
+            appFooter
         }
     }
 
     private func onboardingStep(number: String, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Text(number)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 18, height: 18)
-                .background(
-                    Circle()
-                        .fill(Color.primary.opacity(0.05))
-                )
+                .font(.ui(11, .semibold))
+                .foregroundStyle(BlitztextTheme.onTonal)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(BlitztextTheme.tonal))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .font(.ui(12, .semibold))
                 Text(detail)
-                    .font(.system(size: 11))
+                    .font(.ui(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-    }
-
-    private var onboardingInstallCard: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "arrow.down.app")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.orange)
-                .frame(width: 18, height: 18)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Lege Blitztext zuerst nach /Applications.")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.primary)
-
-                Text("Das hält Anmeldestart, spätere Updates und das Entfernen sauber auf einer einzigen App-Kopie.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.orange.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.orange.opacity(0.12), lineWidth: 0.5)
-        )
     }
 
     // MARK: - Settings Page
 
     private var settingsPage: some View {
         VStack(spacing: 0) {
-            // Header bar
-            HStack {
-                Button {
-                    appState.page = .main
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Zur\u{00FC}ck")
-                            .font(.system(size: 12))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(SubtleButtonStyle())
-
-                Spacer()
-
-                Text("Einstellungen")
-                    .font(.system(size: 12, weight: .semibold))
-
-                Spacer()
+            PageHeader(title: "Einstellungen", onBack: { appState.page = .main }) {
                 settingsQuickAction
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
 
-            Divider()
+            Divider().opacity(0.5)
 
             SettingsContentView(appState: appState)
 
@@ -723,17 +584,9 @@ struct MenuBarView: View {
             Button {
                 appState.requestAccessibilityPermission()
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "hand.raised")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("Rechte")
-                        .font(.system(size: 12))
-                }
-                .foregroundStyle(.orange)
+                Label("Rechte", systemImage: "hand.raised")
             }
-            .buttonStyle(SubtleButtonStyle())
-        } else {
-            Color.clear.frame(width: 58, height: 18)
+            .buttonStyle(.tonalAction)
         }
     }
 
@@ -742,36 +595,12 @@ struct MenuBarView: View {
     private var workflowPage: some View {
         VStack(spacing: 0) {
             if let workflow = appState.activeWorkflow {
-                // Header bar
-                HStack {
-                    Button {
-                        appState.resetCurrentWorkflow()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text("Zur\u{00FC}ck")
-                                .font(.system(size: 12))
-                        }
-                        .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(SubtleButtonStyle())
-
-                    Spacer()
-
-                    HStack(spacing: 5) {
-                        Image(systemName: workflow.type.icon)
-                            .font(.system(size: 11))
-                            .foregroundStyle(workflow.type.color)
-                        Text(appState.displayName(for: workflow.type))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.primary)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-
-                Divider()
+                PageHeader(
+                    title: appState.displayName(for: workflow.type),
+                    icon: workflow.type.icon,
+                    iconTint: workflow.type.color,
+                    onBack: { appState.resetCurrentWorkflow() }
+                )
 
                 // Ein gemeinsamer Aufnahme-/Verarbeitungs-View für alle Workflows.
                 WorkflowActiveView(workflow: workflow)
@@ -783,16 +612,20 @@ struct MenuBarView: View {
         }
     }
 
+    // MARK: - Footer
+
     private var appFooter: some View {
-        HStack {
+        HStack(spacing: 6) {
             // Führt zur Release-Übersicht, nicht auf die Repo-Startseite: Wer
             // auf die eigene Versionsnummer klickt, will wissen, ob es eine
             // neuere gibt — und was sich geändert hat.
             Link(destination: Self.releasesURL) {
                 Text(appVersionLabel)
-                    .font(.system(size: 10))
-                    .foregroundStyle(isVersionHovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
+                    .font(.ui(11))
+                    .foregroundStyle(isVersionHovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
                     .underline(isVersionHovered)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .buttonStyle(.plain)
             .onHover { hovering in
@@ -800,26 +633,56 @@ struct MenuBarView: View {
                     isVersionHovered = hovering
                 }
             }
-            .help("Alle Versionen und Änderungen auf GitHub ansehen")
+            .help("Alle Versionen und \u{00C4}nderungen auf GitHub ansehen")
 
-            Spacer()
+            Spacer(minLength: 4)
+
+            if appState.page == .main {
+                if appState.isConfigured {
+                    Button {
+                        appState.presentFileTranscription()
+                    } label: {
+                        Label("Sprachnachricht", systemImage: "waveform.badge.plus")
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    .buttonStyle(.tonalAction)
+                    .help("Sprachmemo, WhatsApp-Sprachnachricht oder Video transkribieren. Dateien gehen auch per Rechtsklick im Finder.")
+                }
+
+                if appState.appSettings.historyLimit > 0 && !appState.transcriptHistory.isEmpty {
+                    Button {
+                        appState.page = .history
+                    } label: {
+                        Label("Verlauf", systemImage: "clock")
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    .buttonStyle(.tonalAction)
+                }
+            }
 
             Button("Beenden") {
                 NSApplication.shared.terminate(nil)
             }
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(.quaternary)
+            .font(.ui(12))
+            .foregroundStyle(.secondary)
+            .fixedSize()
             .buttonStyle(SubtleButtonStyle())
+            .keyboardShortcut("q", modifiers: .command)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.6)
+        }
     }
 
     private static let releasesURL = URL(string: "https://github.com/immodigit/blitztext-app/releases")!
 
     private var appVersionLabel: String {
         if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
-            return "Blitztext \(version)"
+            return "v\(version)"
         }
         return "Blitztext"
     }
@@ -827,40 +690,24 @@ struct MenuBarView: View {
 
 // MARK: - History Section
 
-/// Zeigt die letzten Ergebnisse direkt auf der Hauptseite. Ein Tippen kopiert
-/// den Text in die Zwischenablage — Rettung, falls er ins falsche Feld ging.
+/// Die letzten Ergebnisse. Ein Tippen kopiert den Text in die Zwischenablage —
+/// Rettung, falls er ins falsche Feld ging; eine Sprachnachricht öffnet ihr
+/// Ergebnisfenster.
 struct HistorySection: View {
     @Bindable var appState: AppState
     @State private var copiedID: UUID?
 
-    /// Im Menü nur die obersten paar zeigen, damit es kompakt bleibt.
-    private static let maxVisible = 4
-
-    private var visibleEntries: [TranscriptHistoryEntry] {
-        Array(appState.transcriptHistory.prefix(Self.maxVisible))
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("ZULETZT")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Leeren") {
-                    appState.clearHistory()
+        VStack(spacing: 0) {
+            ForEach(Array(appState.transcriptHistory.enumerated()), id: \.element.id) { index, entry in
+                if index > 0 {
+                    Divider().opacity(0.5).padding(.leading, 40).padding(.trailing, 12)
                 }
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.tertiary)
-                .buttonStyle(SubtleButtonStyle())
-            }
-
-            VStack(spacing: 4) {
-                ForEach(visibleEntries) { entry in
-                    row(for: entry)
-                }
+                row(for: entry)
             }
         }
+        .padding(.vertical, 4)
+        .card()
     }
 
     private func row(for entry: TranscriptHistoryEntry) -> some View {
@@ -880,64 +727,32 @@ struct HistorySection: View {
                 }
             }
         } label: {
-            HStack(spacing: 8) {
-                // Gleiches Symbol wie der Einstieg „Sprachnachricht transkribieren“,
-                // damit klar ist: Tippen öffnet das Fenster, statt zu kopieren.
+            HStack(alignment: .top, spacing: 10) {
                 Image(systemName: isCopied ? "checkmark" : (isVoiceMessage ? "waveform" : entry.type.icon))
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(isCopied ? Color.green : (isVoiceMessage ? Color.blue : entry.type.color))
-                    .frame(width: 16)
+                    .font(.ui(11, .semibold))
+                    .foregroundStyle(isCopied ? Color.green : (isVoiceMessage ? BlitztextTheme.accent : entry.type.color))
+                    .frame(width: 18)
+                    .padding(.top, 1)
 
                 Text(entry.text)
-                    .font(.system(size: 11))
+                    .font(.ui(12))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .truncationMode(.tail)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                Spacer(minLength: 4)
-
-                Text(isCopied ? "Kopiert" : relativeTime(entry.date))
-                    .font(.system(size: 9.5))
+                Text(isCopied ? "Kopiert" : MenuBarView.relativeTime(entry.date))
+                    .font(.ui(10.5))
                     .foregroundStyle(isCopied ? Color.green : Color.secondary)
                     .fixedSize()
-
-                if isVoiceMessage {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
             .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.primary.opacity(0.035))
-            )
         }
-        .buttonStyle(SubtleButtonStyle())
-        .help(entry.voiceMessage.map { "Sprachnachricht öffnen: \($0.fileName)" } ?? "Kopieren: \(entry.text)")
-    }
-
-    private func relativeTime(_ date: Date) -> String {
-        let seconds = Int(Date().timeIntervalSince(date))
-        if seconds < 60 { return "gerade" }
-        let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes) min" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours) h" }
-        let days = hours / 24
-        return "\(days) d"
-    }
-}
-
-// MARK: - Subtle Button Style
-
-struct SubtleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(configuration.isPressed ? 0.5 : 1.0)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+        .buttonStyle(.plain)
+        .help(entry.voiceMessage.map { "Sprachnachricht \u{00F6}ffnen: \($0.fileName)" } ?? "Kopieren")
     }
 }
 

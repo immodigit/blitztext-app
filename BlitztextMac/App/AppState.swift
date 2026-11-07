@@ -11,6 +11,7 @@ enum PopoverPage: Equatable {
     case workflow
     case fileTranscription
     case improverTextBox
+    case history
 }
 
 /// Zustand der Blitztext+-Textbox (tippen/diktieren → umformen).
