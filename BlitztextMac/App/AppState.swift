@@ -71,16 +71,25 @@ final class AppState {
     private var fileTranscriptionWrittenOutputs: [URL] = []
     private var isProcessingFileTranscriptionQueue = false
     private var currentFileTranscriptionLabel = ""
-    /// Sprecher der zuletzt transkribierten Aufnahme (nil = nur eine Person
+    /// Sprecher der gerade gezeigten Aufnahme (nil = nur eine Person
     /// oder Sprechererkennung aus).
     var speakerReview: SpeakerReview? {
         didSet {
             if let old = oldValue?.clipsDirectory, old != speakerReview?.clipsDirectory {
                 VoiceSamplePlayer.shared.stop()
-                try? FileManager.default.removeItem(at: old)
+                // Hörproben einer Aufnahme, die im Stapel noch zur Zuordnung wartet, bleiben.
+                if !speakerReviewQueue.contains(where: { $0.review.clipsDirectory == old }) {
+                    try? FileManager.default.removeItem(at: old)
+                }
             }
         }
     }
+    /// Stapel: alle Aufnahmen mit offenen Stimmen, der Reihe nach zum Zuordnen.
+    private(set) var speakerReviewQueue: [QueuedSpeakerReview] = []
+    /// Position der gezeigten Aufnahme in `speakerReviewQueue` (nil = kein Stapel).
+    private(set) var speakerReviewQueueIndex: Int?
+    /// Fehlerbilanz eines Stapels, solange dessen Stimmen zugeordnet werden.
+    private(set) var fileBatchNotice: String?
     /// Hinweis, falls die Sprechererkennung nicht lief (Transkript gibt es trotzdem).
     var speakerRecognitionNotice: String?
     /// Die letzte Transkription lief ohne Sprecher, weil das Modell fehlt —
@@ -455,6 +464,8 @@ final class AppState {
                 return
             }
 
+            discardSpeakerReviewQueue()
+
             var succeeded = 0
             var failures: [String] = []
             var webhookFailures: [String] = []
@@ -501,6 +512,16 @@ final class AppState {
                     )
                     conversationNoteTask?.cancel()
                     conversationNote = .idle
+                    if let review, !review.pendingSpeakers.isEmpty {
+                        // Vor dem Anzeigen merken, sonst räumt die nächste Datei die Hörproben weg.
+                        speakerReviewQueue.append(QueuedSpeakerReview(
+                            review: review,
+                            sourceURL: job.url,
+                            fileName: job.url.lastPathComponent,
+                            savedToFile: job.writeTextFile,
+                            speakerNotice: result.speakerNotice
+                        ))
+                    }
                     speakerReview = review
                     speakerRecognitionNotice = result.speakerNotice
                     speakerModelMissingForLastTranscription = result.speakerModelMissing
@@ -533,8 +554,17 @@ final class AppState {
                 fileTranscriptionWrittenOutputs.removeAll()
             }
 
-            // Fehler im Stapel sichtbar machen (statt sie hinter der letzten Datei zu verstecken).
-            if let summary = TranscriptionBatchSummary.text(succeeded: succeeded, failures: failures) {
+            let summary = TranscriptionBatchSummary.text(succeeded: succeeded, failures: failures)
+            // Stapel mit offenen Stimmen: bei der ersten Aufnahme anfangen und jede
+            // einzeln zuordnen lassen, statt nur nach der letzten zu fragen.
+            if succeeded > 1, !speakerReviewQueue.isEmpty {
+                fileBatchNotice = summary
+                // „Erneut senden“ hinge sonst an der letzten Datei, nicht an der gezeigten.
+                lastVoiceMessagePayload = nil
+                showQueuedSpeakerReview(at: 0)
+            } else if let summary {
+                // Fehler im Stapel sichtbar machen (statt sie hinter der letzten Datei zu verstecken).
+                discardSpeakerReviewQueue()
                 // Die Bilanz ersetzt das letzte Transkript — Sprecherzuordnung passt dann nicht mehr dazu.
                 speakerReview = nil
                 fileTranscriptionState = succeeded == 0
@@ -542,6 +572,9 @@ final class AppState {
                     : .done(text: summary, fileName: "Stapel-Bilanz", savedToFile: true)
                 // Die Bilanz ist keine Sprachnachricht — nicht von Hand an den Webhook schicken lassen.
                 lastVoiceMessagePayload = nil
+            } else {
+                // Einzelne Aufnahme: die Nachfrage steht schon da, kein Stapel zum Blättern.
+                discardSpeakerReviewQueue()
             }
             // Im Stapel nennen, welche Dateien nicht ankamen; „Erneut senden“ träfe nur die letzte.
             if succeeded > 1, !webhookFailures.isEmpty {
@@ -611,6 +644,7 @@ final class AppState {
         fileTranscriptionState = .idle
         conversationNoteTask?.cancel()
         conversationNote = .idle
+        discardSpeakerReviewQueue()
         speakerReview = nil
         speakerRecognitionNotice = nil
         speakerModelMissingForLastTranscription = false
@@ -705,6 +739,70 @@ final class AppState {
     func reconsiderSpeaker(_ speakerID: Int) {
         speakerReview?.update(speakerID, to: .unknown)
         applySpeakerReviewChange()
+    }
+
+    // MARK: - Stapel: Stimmen je Aufnahme zuordnen
+
+    var canShowPreviousSpeakerReview: Bool {
+        (speakerReviewQueueIndex ?? 0) > 0
+    }
+
+    var canShowNextSpeakerReview: Bool {
+        guard let index = speakerReviewQueueIndex else { return false }
+        return index + 1 < speakerReviewQueue.count
+    }
+
+    func showNextSpeakerReview() {
+        guard let index = speakerReviewQueueIndex, canShowNextSpeakerReview else { return }
+        showQueuedSpeakerReview(at: index + 1)
+    }
+
+    func showPreviousSpeakerReview() {
+        guard let index = speakerReviewQueueIndex, canShowPreviousSpeakerReview else { return }
+        showQueuedSpeakerReview(at: index - 1)
+    }
+
+    /// Zeigt eine Aufnahme aus dem Stapel. Offene Stimmen werden vorher mit den
+    /// Profilen abgeglichen, die beim Zuordnen der anderen Aufnahmen entstanden sind.
+    private func showQueuedSpeakerReview(at index: Int) {
+        guard speakerReviewQueue.indices.contains(index) else { return }
+        storeShownSpeakerReview()
+
+        var entry = speakerReviewQueue[index]
+        entry.review.refreshMatches(profiles: voiceProfiles.matchingCandidates)
+        speakerReviewQueue[index] = entry
+        speakerReviewQueueIndex = index
+
+        conversationNoteTask?.cancel()
+        conversationNote = .idle
+        lastTranscriptionSourceURL = entry.sourceURL
+        speakerRecognitionNotice = entry.speakerNotice
+        speakerModelMissingForLastTranscription = false
+        speakerReview = entry.review
+        fileTranscriptionState = .done(text: "", fileName: entry.fileName, savedToFile: entry.savedToFile)
+        applySpeakerReviewChange()
+    }
+
+    /// Übernimmt die Zuordnungen der gezeigten Aufnahme in den Stapel (auch
+    /// solche, die schon während des Stapels an der Zwischenanzeige entstanden).
+    private func storeShownSpeakerReview() {
+        guard let review = speakerReview,
+              let index = speakerReviewQueue.firstIndex(where: { $0.review.clipsDirectory == review.clipsDirectory })
+        else { return }
+        speakerReviewQueue[index].review = review
+    }
+
+    /// Räumt die Hörproben der wartenden Aufnahmen weg. Die gezeigte Aufnahme
+    /// räumt `speakerReview` selbst auf, sobald sie ersetzt wird.
+    private func discardSpeakerReviewQueue() {
+        let shown = speakerReview?.clipsDirectory
+        let directories = speakerReviewQueue.map(\.review.clipsDirectory).filter { $0 != shown }
+        speakerReviewQueue.removeAll()
+        speakerReviewQueueIndex = nil
+        fileBatchNotice = nil
+        for directory in directories {
+            try? FileManager.default.removeItem(at: directory)
+        }
     }
 
     /// Schreibt Anzeige und ggf. die .txt mit den aktuellen Namen neu.
