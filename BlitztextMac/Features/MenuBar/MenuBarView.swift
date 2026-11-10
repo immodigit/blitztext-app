@@ -1128,6 +1128,17 @@ struct FileTranscriptionContentView: View {
             }
             .padding(.top, 12)
 
+            if appState.speakerReviewQueue.count > 1, let index = appState.speakerReviewQueueIndex {
+                speakerReviewBatchBar(index: index, total: appState.speakerReviewQueue.count)
+            }
+
+            if let batchNotice = appState.fileBatchNotice {
+                Text(batchNotice)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if appState.speakerModelMissingForLastTranscription {
                 SpeakerModelOfferView(appState: appState)
             }
@@ -1247,6 +1258,51 @@ struct FileTranscriptionContentView: View {
         .onChange(of: appState.speakerReview == nil) { _, noReview in
             if noReview { showingNote = false }
         }
+    }
+
+    /// Stapel: jede Aufnahme mit offenen Stimmen einzeln zuordnen.
+    private func speakerReviewBatchBar(index: Int, total: Int) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                showingNote = false
+                appState.showPreviousSpeakerReview()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(SubtleButtonStyle())
+            .disabled(!appState.canShowPreviousSpeakerReview)
+            .help("Vorherige Aufnahme")
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Aufnahme \(index + 1) von \(total)")
+                    .font(.system(size: 11.5, weight: .semibold))
+                Text("Stimmen je Aufnahme zuordnen. Benannte Stimmen erkennt Blitztext in den nächsten wieder.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 4)
+
+            Button {
+                showingNote = false
+                appState.showNextSpeakerReview()
+            } label: {
+                HStack(spacing: 3) {
+                    Text("Nächste")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.blue)
+            }
+            .buttonStyle(SubtleButtonStyle())
+            .disabled(!appState.canShowNextSpeakerReview)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.06)))
     }
 
     private var noteText: String? {

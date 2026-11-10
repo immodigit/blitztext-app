@@ -69,6 +69,21 @@ struct SpeakerReview: Equatable {
         speakers[index].assignment = assignment
     }
 
+    /// Gleicht die offenen Stimmen mit dem aktuellen Profilstand ab, etwa
+    /// nachdem im selben Stapel eine Stimme benannt wurde.
+    mutating func refreshMatches(profiles: [VoiceProfileCandidate]) {
+        let assignments = speakers.reduce(into: [Int: SpeakerAssignment]()) { $0[$1.id] = $1.assignment }
+        let vectors = speakers.reduce(into: [Int: [Float]]()) { result, speaker in
+            if let vector = speaker.vector { result[speaker.id] = vector }
+        }
+        let refreshed = SpeakerRematch.refreshed(assignments: assignments, vectors: vectors, profiles: profiles)
+        for index in speakers.indices {
+            if let assignment = refreshed[speakers[index].id] {
+                speakers[index].assignment = assignment
+            }
+        }
+    }
+
     /// Redeanteile je Person mit den aktuellen Namen (fürs Kreisdiagramm).
     func talkShares(profileName: (UUID) -> String?, maxColored: Int) -> [TalkShare] {
         let entries = speakers.map { speaker in
@@ -97,6 +112,16 @@ struct SpeakerReview: Equatable {
         let mergedNames = canonicalKey.reduce(into: [Int: String]()) { $0[$1.value] = $1.key }
         return SpeakerTranscriptFormatter.text(turns: SpeakerTurns.merge(pieces), names: mergedNames)
     }
+}
+
+/// Eine Aufnahme aus einem Stapel, deren Stimmen noch zugeordnet werden.
+/// Im Stapel fragt Blitztext nach jeder Aufnahme, nicht nur nach der letzten.
+struct QueuedSpeakerReview: Equatable {
+    var review: SpeakerReview
+    let sourceURL: URL
+    let fileName: String
+    let savedToFile: Bool
+    let speakerNotice: String?
 }
 
 /// Zustand der Gesprächsnotiz (Zusammenfassung je Person).

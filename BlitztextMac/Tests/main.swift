@@ -872,6 +872,43 @@ do {
 
 check(WebhookPayload.test(appVersion: "1.8.0").isTest, "Testnachricht ist als Test markiert")
 
+// MARK: - Sprechererkennung: Abgleich im Stapel
+
+do {
+    let daniel = UUID(), chris = UUID()
+    let profiles = [VoiceProfileCandidate(id: daniel, vector: [1, 0, 0]), VoiceProfileCandidate(id: chris, vector: [0, 1, 0])]
+    let vectors: [Int: [Float]] = [0: [0.98, 0.05, 0], 1: [0, 0.97, 0.1], 2: [0, 0, 1]]
+
+    // Daniel wurde erst in einer früheren Aufnahme des Stapels benannt.
+    let refreshed = SpeakerRematch.refreshed(
+        assignments: [0: .unknown, 1: .confirmed(profileID: chris), 2: .unknown],
+        vectors: vectors,
+        profiles: profiles
+    )
+    if case .recognized(let id, _) = refreshed[0] { equal(id, daniel, "in Aufnahme 1 benannte Stimme wird in Aufnahme 2 erkannt") } else { check(false, "Sprecher 0 sollte nach dem Neuabgleich erkannt sein") }
+    equal(refreshed[1], .confirmed(profileID: chris), "entschiedene Stimme bleibt unangetastet")
+    equal(refreshed[2], .unknown, "fremde Stimme bleibt offen")
+
+    let skipped = SpeakerRematch.refreshed(
+        assignments: [0: .skipped, 1: .named("Gast")],
+        vectors: vectors,
+        profiles: profiles
+    )
+    equal(skipped[0], .skipped, "übersprungene Stimme wird nicht neu zugeordnet")
+    equal(skipped[1], .named("Gast"), "nur hier benannte Stimme bleibt benannt")
+
+    // Chris ist schon vergeben: die zweite, ähnliche Stimme bekommt das Profil nicht.
+    let taken = SpeakerRematch.refreshed(
+        assignments: [0: .recognized(profileID: chris, similarity: 0.9), 1: .unknown],
+        vectors: [0: [0, 1, 0], 1: [0, 0.95, 0.2]],
+        profiles: profiles
+    )
+    equal(taken[1], .unknown, "ein schon vergebenes Profil wird keiner zweiten Stimme derselben Aufnahme zugeordnet")
+
+    equal(SpeakerRematch.refreshed(assignments: [0: .unknown], vectors: [:], profiles: profiles), [0: .unknown],
+          "ohne Fingerabdruck bleibt die Stimme offen")
+}
+
 // MARK: - Ergebnis
 
 print("Tests: \(passed) grün, \(failures) rot")

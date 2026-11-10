@@ -182,3 +182,41 @@ public enum SpeakerClusterMerger {
         return result
     }
 }
+
+/// Gleicht die noch offenen Stimmen einer Aufnahme erneut mit den Profilen ab.
+/// Gebraucht im Stapel: Wer in Aufnahme 1 benannt wurde, soll in Aufnahme 2
+/// erkannt werden, statt dort ein zweites Mal gefragt zu werden.
+public enum SpeakerRematch {
+    /// Entschiedene Stimmen bleiben unangetastet, und ihre Profile sind für die
+    /// übrigen Stimmen derselben Aufnahme tabu (ein Profil, eine Stimme).
+    public static func refreshed(
+        assignments: [Int: SpeakerAssignment],
+        vectors: [Int: [Float]],
+        profiles: [VoiceProfileCandidate],
+        thresholds: VoiceMatchThresholds = .standard
+    ) -> [Int: SpeakerAssignment] {
+        var taken = Set<UUID>()
+        for assignment in assignments.values {
+            switch assignment {
+            case let .recognized(profileID, _), let .confirmed(profileID):
+                taken.insert(profileID)
+            case .suggested, .unknown, .named, .skipped:
+                break
+            }
+        }
+
+        let open = vectors.filter { assignments[$0.key]?.needsDecision ?? false }
+        guard !open.isEmpty else { return assignments }
+
+        let matches = VoiceMatcher.match(
+            speakers: open,
+            profiles: profiles.filter { !taken.contains($0.id) },
+            thresholds: thresholds
+        )
+        var result = assignments
+        for (speaker, match) in matches {
+            result[speaker] = SpeakerAssignment(match: match)
+        }
+        return result
+    }
+}
