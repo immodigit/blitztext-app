@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/immodigit/blitztext-app/compare/v1.9.0...v1.9.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **sprecher:** im Stapel nach den Stimmen jeder Aufnahme fragen ([563119d](https://github.com/immodigit/blitztext-app/commit/563119df3d5b673820764b9e7f6056e4000f92eb))
+
 ## [1.9.0](https://github.com/immodigit/blitztext-app/compare/v1.8.0...v1.9.0) (2026-11-08)
 
 
